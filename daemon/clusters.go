@@ -2,14 +2,15 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/network"
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 )
 
 func newRandomClusterID() string {
@@ -37,6 +38,18 @@ type Cluster struct {
 	Owner   string
 	Timeout time.Time
 	Nodes   []*Node
+}
+
+func checkBuildExists(url string) error {
+	resp, err := http.Head(url)
+	if err != nil {
+		return errors.Wrap(err, "Could not locate build")
+	}
+	if resp.StatusCode != 200 {
+		return errors.New("Could not locate build")
+	}
+
+	return nil
 }
 
 func getCluster(ctx context.Context, clusterID string) (*Cluster, error) {
@@ -143,7 +156,7 @@ func allocateCluster(ctx context.Context, opts ClusterOptions) (string, error) {
 	}
 
 	clusterID := newRandomClusterID()
-	timeoutTime := time.Now().Add(1 * time.Hour)
+	timeoutTime := time.Now().Add(1 * time.Hour) // TODO: use the opts.Timeout
 
 	meta := ClusterMeta{
 		Owner:   ContextUser(ctx),
@@ -161,6 +174,49 @@ func allocateCluster(ctx context.Context, opts ClusterOptions) (string, error) {
 		}
 
 		nodesToAllocate = append(nodesToAllocate, node)
+	}
+
+	if len(nodesToAllocate) > 0 {
+		// We assume that all nodes are using the same server version.
+		node := nodesToAllocate[0]
+		containerImage := node.VersionInfo.toImageName()
+
+		if dockerRegistry == "" {
+			err = checkBuildExists(fmt.Sprintf("%s/%s", node.VersionInfo.toURL(), node.VersionInfo.toPkgName()))
+			if err != nil {
+				return "", err
+			}
+
+			// If the image is already built then this will won't rebuild
+			log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
+			err = imageBuild(ctx, node.VersionInfo, "dockerfiles/centos7") // TODO: might want this to be a config too
+			if err != nil {
+				return "", err
+			}
+		} else {
+			log.Printf("Pulling %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
+			err = imagePull(ctx, containerImage)
+			if err != nil {
+				// assume that pull failed because the image didn't exist on the registry
+				// check the build exists and then build the image
+				err = checkBuildExists(fmt.Sprintf("%s/%s", node.VersionInfo.toURL(), node.VersionInfo.toPkgName()))
+				if err != nil {
+					return "", err
+				}
+
+				log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
+				err = imageBuild(ctx, node.VersionInfo, "dockerfiles/centos7") // TODO: might want this to be a config too
+				if err != nil {
+					return "", err
+				}
+
+				log.Printf("Pushing %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
+				err = imagePush(ctx, node.VersionInfo)
+				if err != nil {
+					return "", err
+				}
+			}
+		}
 	}
 
 	signal := make(chan error)

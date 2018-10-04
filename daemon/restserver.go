@@ -228,10 +228,17 @@ func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, node := range reqData.Nodes {
+		nodeVersion, err := parseServerVersion(node.ServerVersion)
+		if err != nil {
+			writeJSONError(w, err)
+			return
+		}
+
 		nodeOpts := NodeOptions{
 			Name:          node.Name,
 			Platform:      node.Platform,
 			ServerVersion: node.ServerVersion,
+			VersionInfo:   nodeVersion,
 		}
 		clusterOpts.Nodes = append(clusterOpts.Nodes, nodeOpts)
 	}

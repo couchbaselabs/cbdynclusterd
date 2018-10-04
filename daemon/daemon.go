@@ -15,6 +15,7 @@ import (
 var docker *client.Client
 var metaStore *MetaDataStore
 var systemCtx context.Context
+var dockerRegistry = "http://sdk-s435.sc.couchbase.com/" // TODO: get this from a config
 
 func openMeta() error {
 	meta := &MetaDataStore{}
@@ -31,7 +32,7 @@ func openMeta() error {
 func connectDocker() error {
 	var clientOpts []func(*client.Client) error
 	clientOpts = append(clientOpts, client.FromEnv)
-	clientOpts = append(clientOpts, client.WithHost("http://172.23.104.43:2376"))
+	clientOpts = append(clientOpts, client.WithHost("http://172.23.104.43:2376")) // TODO: get this from a config
 	clientOpts = append(clientOpts, client.WithVersion("1.38"))
 
 	cli, err := client.NewClientWithOpts(clientOpts...)
@@ -40,6 +41,17 @@ func connectDocker() error {
 	}
 
 	docker = cli
+	return nil
+}
+
+func connectRegistry(ctx context.Context, uri string) error {
+	_, err := docker.RegistryLogin(ctx, types.AuthConfig{
+		ServerAddress: uri,
+	})
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
