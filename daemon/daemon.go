@@ -15,7 +15,7 @@ import (
 var docker *client.Client
 var metaStore *MetaDataStore
 var systemCtx context.Context
-var dockerRegistry = "http://sdk-s435.sc.couchbase.com/" // TODO: get this from a config
+var dockerRegistry = "dockerhub.build.couchbase.com" // TODO: get this from a config
 
 func openMeta() error {
 	meta := &MetaDataStore{}

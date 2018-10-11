@@ -58,19 +58,19 @@ var versionToFlavor = map[string]map[string]string{
 	"6": map[string]string{"0": "alice", "5": "mad-hatter"},
 }
 
-func flavorFromSemver(semver string) (string, error) {
-	semverSplit := strings.Split(semver, ".")
-	major := semverSplit[0]
-	minor, err := strconv.Atoi(semverSplit[1])
+func flavorFromVersion(version string) (string, error) {
+	versionSplit := strings.Split(version, ".")
+	major := versionSplit[0]
+	minor, err := strconv.Atoi(versionSplit[1])
 	if err != nil {
 		return "", errors.New("Could not convert version minor to int")
 	}
 
 	var minorS string
-	if 5-minor < 0 {
-		minorS = "0"
-	} else {
+	if 5-minor <= 0 {
 		minorS = "5"
+	} else {
+		minorS = "0"
 	}
 
 	flavor, ok := versionToFlavor[major][minorS]
@@ -84,7 +84,7 @@ func flavorFromSemver(semver string) (string, error) {
 func parseServerVersion(version string) (*NodeVersion, error) {
 	nodeVersion := NodeVersion{}
 	versionParts := strings.Split(version, "-")
-	flavor, err := flavorFromSemver(versionParts[0])
+	flavor, err := flavorFromVersion(versionParts[0])
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +111,8 @@ func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts
 			"com.couchbase.dyncluster.node_name":              opts.Name,
 			"com.couchbase.dyncluster.initial_server_version": opts.ServerVersion,
 		},
+		// same effect as ntp
+		Volumes: map[string]struct{}{ "/etc/localtime:/etc/localtime": {} },
 	}, &container.HostConfig{
 		AutoRemove:  true,
 		NetworkMode: "macvlan0",
