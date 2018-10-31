@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
+	"github.com/golang/glog"
 )
 
 type ClusterMetaJSON struct {
@@ -145,6 +146,13 @@ func (store *MetaDataStore) GetClusterMeta(clusterID string) (ClusterMeta, error
 	clusterKey := []byte(fmt.Sprintf("cluster-%s", clusterID))
 
 	var meta ClusterMeta
+	// dgraph-io/badger sometimes panicing
+	defer func() {
+		if r := recover(); r != nil {
+			glog.Warningf("Something went wrong while retrieving cluster meta")
+			return
+		}
+	}()
 	err := store.db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get(clusterKey)
 		if err != nil {

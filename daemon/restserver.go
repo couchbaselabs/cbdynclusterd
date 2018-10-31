@@ -8,9 +8,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
 	"github.com/gorilla/mux"
+	"github.com/couchbaselabs/cbdynclusterd/helper"
 )
+
 
 type ErrorJSON struct {
 	Error struct {
@@ -61,6 +62,7 @@ type ClusterJSON struct {
 	Owner   string     `json:"owner"`
 	Timeout string     `json:"timeout"`
 	Nodes   []NodeJSON `json:"nodes"`
+	EntryPoint string  `json:"entry"`
 }
 
 func jsonifyCluster(cluster *Cluster) ClusterJSON {
@@ -69,6 +71,7 @@ func jsonifyCluster(cluster *Cluster) ClusterJSON {
 		Creator: cluster.Creator,
 		Owner:   cluster.Owner,
 		Timeout: cluster.Timeout.Format(time.RFC3339),
+		EntryPoint: cluster.EntryPoint,
 	}
 
 	for _, node := range cluster.Nodes {
@@ -84,6 +87,7 @@ func UnjsonifyCluster(jsonCluster *ClusterJSON) (*Cluster, error) {
 	cluster.ID = jsonCluster.ID
 	cluster.Creator = jsonCluster.Creator
 	cluster.Owner = jsonCluster.Owner
+	cluster.EntryPoint = jsonCluster.EntryPoint
 
 	clusterTimeout, err := time.Parse(time.RFC3339, jsonCluster.Timeout)
 	if err != nil {
@@ -186,7 +190,14 @@ type CreateClusterNodeJSON struct {
 	ServerVersion string `json:"server_version"`
 }
 
+
+
 type CreateClusterSetupJSON struct {
+	Services       []string `json:"services"`
+	StorageMode    string   `json:"storage_mode"`
+	RamQuota       int      `json:"ram_quota"`
+	Bucket         *helper.BucketOption   `json:"bucket"`
+	User           *helper.UserOption     `json:"user"`
 }
 
 type CreateClusterJSON struct {
@@ -281,6 +292,48 @@ type UpdateClusterJSON struct {
 	Timeout string `json:"timeout"`
 }
 
+func HttpSetupCluster(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	var reqData CreateClusterSetupJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	cluster, err := getCluster(reqCtx, clusterID)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+	if len(cluster.Nodes) != len(reqData.Services) {
+		writeJSONError(w, errors.New("services does not map to number of nodes"))
+		return
+	}
+
+	epnode, err := SetupCluster(&ClusterSetupOptions{
+		Nodes: cluster.Nodes,
+		Conf: reqData,
+	})
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	cluster.EntryPoint = epnode
+
+	jsonCluster := jsonifyCluster(cluster)
+	writeJsonResponse(w, jsonCluster)
+	return
+}
+
 func HttpUpdateCluster(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
@@ -338,6 +391,7 @@ func createRESTRouter() *mux.Router {
 	r.HandleFunc("/clusters", HttpCreateCluster).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}", HttpGetCluster).Methods("GET")
 	r.HandleFunc("/cluster/{cluster_id}", HttpUpdateCluster).Methods("PUT")
+	r.HandleFunc("/cluster/{cluster_id}/setup", HttpSetupCluster).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}", HttpDeleteCluster).Methods("DELETE")
 	return r
 }

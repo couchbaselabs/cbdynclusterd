@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/couchbaselabs/cbdynclusterd/helper"
 )
 
 func newRandomClusterID() string {
@@ -38,6 +39,7 @@ type Cluster struct {
 	Owner   string
 	Timeout time.Time
 	Nodes   []*Node
+	EntryPoint string
 }
 
 func checkBuildExists(url string) error {
@@ -189,7 +191,7 @@ func allocateCluster(ctx context.Context, opts ClusterOptions) (string, error) {
 
 			// If the image is already built then this will won't rebuild
 			log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
-			err = imageBuild(ctx, node.VersionInfo, "sdkqe-resource/dockerfiles/couchbase/centos7") // TODO: might want this to be a config too
+			err = imageBuild(ctx, node.VersionInfo, helper.DockerFilePath+"couchbase/centos7") // TODO: might want this to be a config too
 			if err != nil {
 				return "", err
 			}
@@ -205,7 +207,7 @@ func allocateCluster(ctx context.Context, opts ClusterOptions) (string, error) {
 					return "", err
 				} else {
 					log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
-					err = imageBuild(ctx, node.VersionInfo, "sdkqe-resource/dockerfiles/couchbase/centos7") // TODO: might want this to be a config too
+					err = imageBuild(ctx, node.VersionInfo, helper.DockerFilePath+"couchbase/centos7") // TODO: might want this to be a config too
 					if err != nil {
 						return "", err
 					}
