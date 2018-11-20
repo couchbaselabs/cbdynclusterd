@@ -20,8 +20,8 @@ import (
 var (
 	IniFile        *string
 	Slowlog        bool
-	RestRetry = 10
-	RestTimeout = 1000*time.Second
+	RestRetry = 60
+	RestTimeout = 60*time.Second
 	WaitTimeout = 30*time.Second
 	restInterval = 3*time.Second
 	PattActual, _ = regexp.Compile("\\s*vb_active_itm_memory:\\s*([0-9]+)")
@@ -62,6 +62,8 @@ const (
 	PSettingsIndexes   = "/settings/indexes"
 	PN1ql              = "/query"
 	PFts               = "/api/index"
+
+	Domain             = "/domain"
 
 	DockerFilePath = "deps/sdkqe-resource/dockerfiles/"
 
@@ -118,6 +120,7 @@ type RestCall struct {
 	Cred *Cred
 	Body string
 	Header map[string]string
+	ContentType string
 }
 
 func Usage() {
@@ -332,7 +335,11 @@ func GetResponse(params *RestCall) (string, error) {
 	req, err := http.NewRequest(method, url, strings.NewReader(postBody))
 	if err != nil { return "", err }
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(login.Username+":"+login.Password)))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	contentType := "application/x-www-form-urlencoded"
+	if params.ContentType != "" {
+		contentType = params.ContentType
+	}
+	req.Header.Set("Content-Type", contentType)
 	for k,v := range header {
 		req.Header.Set(k, v)
 	}

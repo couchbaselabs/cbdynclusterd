@@ -26,6 +26,7 @@ type ClusterOptions struct {
 
 type Node struct {
 	ContainerID          string
+	ContainerName        string
 	State                string
 	Name                 string
 	InitialServerVersion string
@@ -97,7 +98,7 @@ func getAllClusters(ctx context.Context) ([]*Cluster, error) {
 
 		var nodes []*Node
 		for _, container := range containers {
-			eth0Net := container.NetworkSettings.Networks["macvlan0"]
+			eth0Net := container.NetworkSettings.Networks[NetworkName]
 			if eth0Net == nil {
 				// This is a little hack to make sure wierd stuff doesn't stop the node
 				// from showing up in the nodes list
@@ -112,6 +113,7 @@ func getAllClusters(ctx context.Context) ([]*Cluster, error) {
 
 			nodes = append(nodes, &Node{
 				ContainerID:          container.ID[0:12],
+				ContainerName:        container.Names[0],
 				State:                container.State,
 				Name:                 container.Labels["com.couchbase.dyncluster.node_name"],
 				InitialServerVersion: container.Labels["com.couchbase.dyncluster.initial_server_version"],

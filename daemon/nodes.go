@@ -11,7 +11,10 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/couchbaselabs/cbdynclusterd/helper"
+	"github.com/golang/glog"
 )
+var NetworkName = "macvlan0"
 
 type NodeOptions struct {
 	Name          string
@@ -103,6 +106,10 @@ func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts
 	containerName := fmt.Sprintf("dynclsr-%s-%s", clusterID, opts.Name)
 	containerImage := opts.VersionInfo.toImageName()
 
+	var dns []string
+	if dnsHostFlag != "" {
+		dns = append(dns, dnsHostFlag)
+	}
 	createResult, err := docker.ContainerCreate(context.Background(), &container.Config{
 		Image: containerImage,
 		Labels: map[string]string{
@@ -115,7 +122,8 @@ func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts
 		Volumes: map[string]struct{}{ "/etc/localtime:/etc/localtime": {} },
 	}, &container.HostConfig{
 		AutoRemove:  true,
-		NetworkMode: "macvlan0",
+		NetworkMode: container.NetworkMode(NetworkName),
+		DNS: dns,
 	}, nil, containerName)
 	if err != nil {
 		return "", err
@@ -125,8 +133,41 @@ func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts
 	if err != nil {
 		return "", err
 	}
-
+	containerJSON, err := docker.ContainerInspect(context.Background(), createResult.ID)
+	if err != nil {
+		return "", err
+	}
+	ipv4 := containerJSON.NetworkSettings.Networks[NetworkName].IPAddress
+	ipv6 := containerJSON.NetworkSettings.Networks[NetworkName].GlobalIPv6Address
+	containerHostName := containerName+".couchbase.com"
+	if ipv4 != "" {
+		glog.Infof("register %s => %s on %s\n", ipv4, containerHostName, dnsHostFlag)
+		body, err := registerDomainName(containerHostName, ipv4)
+		if err != nil {
+			glog.Warningf("Failed registering IPv4:%s, %s", err, body)
+		}
+	}
+	if ipv6 != "" {
+		body, err := registerDomainName(containerHostName, ipv6)
+		glog.Warningf("Failed registering IPv6:%s, %s", err, body)
+	}
 	return createResult.ID, nil
+}
+
+// assign hostname to the IP in DNS server
+func registerDomainName(hostname, ip string) (string, error){
+	restParam := &helper.RestCall {
+		ExpectedCode: 200,
+		ContentType: "application/json",
+		Method: "PUT",
+		Cred: &helper.Cred {
+			Hostname: dnsHostFlag,
+			Port: 80,
+		},
+		Path: helper.Domain+"/"+hostname,
+		Body: "{\"ips\":[\""+ip+"\"]}",
+	}
+	return helper.RestRetryer(helper.RestRetry, restParam, helper.GetResponse)
 }
 
 func killNode(ctx context.Context, containerID string) error {
