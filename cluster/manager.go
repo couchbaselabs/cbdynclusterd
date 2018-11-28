@@ -62,6 +62,7 @@ type Config struct {
 	Version      VersionTuple
 	StorageMode  string
 	Bucket       *helper.BucketOption
+	UseHostname  bool
 	IsEnterprise bool
 }
 
@@ -197,6 +198,11 @@ func (m *Manager) setupNewCluster() (string, error) {
 	if err != nil { return "", err }
 	glog.Infof("Set data memory quota to %d", memoryQuota)
 	if err := epnode.SetupMemoryQuota(memoryQuota); err != nil { return "", err }
+
+	if m.Config.UseHostname {
+		glog.Infof("Set hostname to entry point node")
+		if err := epnode.Rename(epnode.HostName); err != nil { return "", err }
+	}
 
 	glog.Info("SetupInititalService")
 	if err := epnode.SetupInitialService(); err != nil { return "", err }

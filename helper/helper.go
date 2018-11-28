@@ -62,8 +62,10 @@ const (
 	PSettingsIndexes   = "/settings/indexes"
 	PN1ql              = "/query"
 	PFts               = "/api/index"
+	PRename            = "/node/controller/rename"
 
 	Domain             = "/domain"
+	DomainPostfix      = ".couchbase.com"
 
 	DockerFilePath = "deps/sdkqe-resource/dockerfiles/"
 

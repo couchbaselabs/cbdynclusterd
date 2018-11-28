@@ -211,6 +211,28 @@ func (n *Node) GetMemUsedStats(bucket string) (*helper.MemUsedStats, error) {
 	}, nil
 }
 
+func (n *Node) Rename(hostname string) error {
+	body := fmt.Sprintf("hostname=%s", hostname)
+
+	restParam := &helper.RestCall {
+		ExpectedCode: 200,
+		Method: "POST",
+		Path: helper.PRename,
+		Cred: n.RestLogin,
+		Body: body,
+		Header: map[string]string{"Content-Type":"application/x-www-form-urlencoded"},
+	}
+	_, err := helper.RestRetryer(helper.RestRetry, restParam, helper.GetResponse)
+	if err == nil {
+		glog.Infof("Succesfully renamed to %s", hostname)
+	} else {
+		glog.Errorf("Error while renaming to %s:%s", hostname, err)
+	}
+
+	return err
+
+}
+
 func (n *Node) SetupMemoryQuota(memoryQuota int) error {
 	body := fmt.Sprintf("memoryQuota=%d", memoryQuota)
 

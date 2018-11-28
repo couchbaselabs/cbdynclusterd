@@ -27,6 +27,10 @@ func jsonifyError(err error) ErrorJSON {
 	return jsonErr
 }
 
+type RefreshJSON struct {
+	Timeout         string `json:"timeout"`
+}
+
 type NodeJSON struct {
 	ID                   string `json:"id"`
 	ContainerName        string `json:"container_name"`
@@ -218,12 +222,12 @@ type CreateClusterNodeJSON struct {
 	ServerVersion string `json:"server_version"`
 }
 
-
-
 type CreateClusterSetupJSON struct {
 	Services       []string `json:"services"`
 	StorageMode    string   `json:"storage_mode"`
 	RamQuota       int      `json:"ram_quota"`
+	UseHostname    bool     `json:"use_hostname"`
+	UseIpv6        bool     `json:"use_ipv6"`
 	Bucket         *helper.BucketOption   `json:"bucket"`
 	User           *helper.UserOption     `json:"user"`
 }
