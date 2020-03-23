@@ -6,14 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbaselabs/cbdynclusterd/helper"
-	"github.com/golang/glog"
 	"io"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/couchbaselabs/cbdynclusterd/helper"
+	"github.com/golang/glog"
 )
 
 var (
@@ -56,13 +57,14 @@ func (v *VersionTuple) String() string {
 }
 
 type Config struct {
-	MemoryQuota  string
-	User         *helper.UserOption
-	Version      VersionTuple
-	StorageMode  string
-	Bucket       *helper.BucketOption
-	UseHostname  bool
-	IsEnterprise bool
+	MemoryQuota   string
+	User          *helper.UserOption
+	Version       VersionTuple
+	StorageMode   string
+	Bucket        *helper.BucketOption
+	UseHostname   bool
+	IsEnterprise  bool
+	UseDevPreview bool
 }
 
 func (m *Manager) GetMemUsedStats(bucket string) (*helper.MemUsedStats, error) {
@@ -285,6 +287,12 @@ func (m *Manager) setupNewCluster() (string, error) {
 		}
 	}
 
+	if m.Config.UseDevPreview {
+		if err = m.EnableDeveloperPreview(); err != nil {
+			return "", err
+		}
+	}
+
 	return fmt.Sprintf("http://%s:%s", epnode.HostName, epnode.Port), nil
 }
 
@@ -424,6 +432,17 @@ func (m *Manager) CreateUser(cred *helper.UserOption) error {
 	return nil
 }
 
+func (m *Manager) EnableDeveloperPreview() error {
+	epNode, err := getEpNode(false, m.Nodes)
+	if err != nil {
+		return err
+	}
+	if err = epNode.EnableDeveloperPreview(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) CreateFtsIndex(name, bucketType, bucketName string) error {
 	ftsNode, err := getFtsNode(false, m.Nodes)
 	if err != nil {
@@ -525,11 +544,9 @@ func (m *Manager) SetupBucket(bucketName, bucketType, bucketPassword string) err
 	}
 
 	return m.Nodes[m.epNode].WaitForBucketReady()
-
 }
 
 func getNodes(ini []string) []*Node {
-
 	var nodes []*Node
 	for _, spec := range ini {
 		nodeInfo := strings.Split(spec, ":")

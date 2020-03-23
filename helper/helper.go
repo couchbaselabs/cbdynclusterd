@@ -5,9 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/couchbase/gocb"
-	"github.com/couchbase/gocb/cbft"
-	"github.com/golang/glog"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -15,6 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/couchbase/gocb"
+	"github.com/couchbase/gocb/cbft"
+	"github.com/golang/glog"
 )
 
 var (
@@ -63,6 +64,7 @@ const (
 	PN1ql              = "/query"
 	PFts               = "/api/index"
 	PRename            = "/node/controller/rename"
+	PDeveloperPreview  = "/settings/developerPreview"
 
 	Domain        = "/domain"
 	DomainPostfix = ".couchbase.com"

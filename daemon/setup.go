@@ -1,9 +1,10 @@
 package daemon
 
 import (
+	"strconv"
+
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"github.com/couchbaselabs/cbdynclusterd/helper"
-	"strconv"
 )
 
 type ClusterSetupOptions struct {
@@ -38,11 +39,12 @@ func SetupCluster(opts *ClusterSetupOptions) (string, error) {
 	}
 
 	config := cluster.Config{
-		MemoryQuota: strconv.Itoa(opts.Conf.RamQuota),
-		StorageMode: opts.Conf.StorageMode,
-		User:        opts.Conf.User,
-		Bucket:      opts.Conf.Bucket,
-		UseHostname: opts.Conf.UseHostname,
+		MemoryQuota:   strconv.Itoa(opts.Conf.RamQuota),
+		StorageMode:   opts.Conf.StorageMode,
+		User:          opts.Conf.User,
+		Bucket:        opts.Conf.Bucket,
+		UseHostname:   opts.Conf.UseHostname,
+		UseDevPreview: opts.Conf.UseDeveloperPreview,
 	}
 
 	clusterManager := &cluster.Manager{

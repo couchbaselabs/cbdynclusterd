@@ -5,10 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbaselabs/cbdynclusterd/helper"
-	"github.com/golang/glog"
-	"github.com/hnakamur/go-scp"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"net/url"
 	"os"
@@ -17,6 +13,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/couchbaselabs/cbdynclusterd/helper"
+	"github.com/golang/glog"
+	"github.com/hnakamur/go-scp"
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -415,6 +416,21 @@ func (n *Node) SetStorageMode(storageMode string) error {
 		Path:         helper.PSettingsIndexes,
 		Cred:         n.RestLogin,
 		Body:         body,
+		Header:       map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}
+
+	_, err := helper.RestRetryer(helper.RestRetry, restParam, helper.GetResponse)
+
+	return err
+}
+
+func (n *Node) EnableDeveloperPreview() error {
+	restParam := &helper.RestCall{
+		ExpectedCode: 200,
+		Method:       "POST",
+		Path:         helper.PDeveloperPreview,
+		Cred:         n.RestLogin,
+		Body:         "enabled=true",
 		Header:       map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
 	}
 

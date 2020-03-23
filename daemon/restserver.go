@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbaselabs/cbdynclusterd/helper"
-	"github.com/gorilla/mux"
 	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/couchbaselabs/cbdynclusterd/helper"
+	"github.com/gorilla/mux"
 )
 
 var Version string
@@ -223,13 +224,14 @@ type CreateClusterNodeJSON struct {
 }
 
 type CreateClusterSetupJSON struct {
-	Services    []string             `json:"services"`
-	StorageMode string               `json:"storage_mode"`
-	RamQuota    int                  `json:"ram_quota"`
-	UseHostname bool                 `json:"use_hostname"`
-	UseIpv6     bool                 `json:"use_ipv6"`
-	Bucket      *helper.BucketOption `json:"bucket"`
-	User        *helper.UserOption   `json:"user"`
+	Services            []string             `json:"services"`
+	StorageMode         string               `json:"storage_mode"`
+	RamQuota            int                  `json:"ram_quota"`
+	UseHostname         bool                 `json:"use_hostname"`
+	UseIpv6             bool                 `json:"use_ipv6"`
+	Bucket              *helper.BucketOption `json:"bucket"`
+	User                *helper.UserOption   `json:"user"`
+	UseDeveloperPreview bool                 `json:"developer_preview"`
 }
 
 type CreateClusterJSON struct {
