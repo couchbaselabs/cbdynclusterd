@@ -28,7 +28,7 @@ var systemCtx context.Context
 var dockerRegistry = "dockerhub.build.couchbase.com" // TODO: get this from a config
 var cfgFile string
 var cfgFileName = ".cbdynclusterd.toml"
-var dockerRegistryFlag, dockerHostFlag, dockerPortFlag, dnsHostFlag string
+var dockerRegistryFlag, dockerHostFlag, dockerPortFlag, dockerSocketFlag, dnsHostFlag string
 
 var rootCmd = &cobra.Command{
 	Use:   "cbdynclusterd",
@@ -55,6 +55,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&dockerRegistryFlag, "docker-registry", "dockerhub.build.couchbase.com", "docker registry to pull/push images")
 	rootCmd.PersistentFlags().StringVar(&dockerHostFlag, "docker-host", "172.23.104.43", "docker host where containers are running")
 	rootCmd.PersistentFlags().StringVar(&dockerPortFlag, "docker-port", "2376", "docker port where docker daemon is running on")
+	rootCmd.PersistentFlags().StringVar(&dockerSocketFlag, "docker-socket", "", "docker socket where docker daemon is running on (format of unix:///var/run/docker.sock)")
 	rootCmd.PersistentFlags().StringVar(&dnsHostFlag, "dns-host", "172.23.111.128", "dns server IP")
 }
 
@@ -90,6 +91,7 @@ func initConfig() {
 	dockerRegistryFlag = getArg("docker-registry")
 	dockerHostFlag = getArg("docker-host")
 	dockerPortFlag = getArg("docker-port")
+	dockerSocketFlag = getArg("docker-socket")
 	dnsHostFlag = getArg("dns-host")
 
 }
@@ -103,6 +105,7 @@ func createConfigFile(configFile string) error {
 	tmap.Set("docker-registry", dockerRegistryFlag)
 	tmap.Set("docker-host", dockerHostFlag)
 	tmap.Set("docker-port", dockerPortFlag)
+	tmap.Set("docker-socket", dockerSocketFlag)
 	tmap.Set("dns-host", dnsHostFlag)
 
 	return ioutil.WriteFile(configFile, []byte(tmap.String()), 0644)
@@ -134,8 +137,12 @@ func openMeta() error {
 }
 
 func connectDocker() error {
+	host := "tcp://" + dockerHostFlag + ":" + dockerPortFlag
+	if dockerSocketFlag != "" {
+		host = dockerSocketFlag
+	}
 	cli, err := client.NewClient(
-		"tcp://"+dockerHostFlag+":"+dockerPortFlag,
+		host,
 		"1.38",
 		nil,
 		nil)
