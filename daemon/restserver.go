@@ -446,6 +446,42 @@ func HttpDeleteCluster(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
+type AddBucketJSON struct {
+	Name         string `json:"name"`
+	StorageMode  string `json:"storage_mode"`
+	RamQuota     int    `json:"ram_quota"`
+	UseHostname  bool   `json:"use_hostname"`
+	ReplicaCount int    `json:"replica_count"`
+	BucketType   string `json:"bucket_type"`
+}
+
+func HttpAddBucket(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	var reqData AddBucketJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	err = addBucket(reqCtx, clusterID, AddBucketOptions{
+		Conf: reqData,
+	})
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	w.WriteHeader(200)
+}
+
 func createRESTRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/", HttpRoot)
@@ -457,5 +493,6 @@ func createRESTRouter() *mux.Router {
 	r.HandleFunc("/cluster/{cluster_id}", HttpUpdateCluster).Methods("PUT")
 	r.HandleFunc("/cluster/{cluster_id}/setup", HttpSetupCluster).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}", HttpDeleteCluster).Methods("DELETE")
+	r.HandleFunc("/cluster/{cluster_id}/add-bucket", HttpAddBucket).Methods("POST")
 	return r
 }
