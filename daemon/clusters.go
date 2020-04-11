@@ -20,8 +20,9 @@ func newRandomClusterID() string {
 }
 
 type ClusterOptions struct {
-	Timeout time.Duration
-	Nodes   []NodeOptions
+	Timeout   time.Duration
+	Nodes     []NodeOptions
+	CLusterID string
 }
 
 type Node struct {
@@ -159,7 +160,10 @@ func allocateCluster(ctx context.Context, opts ClusterOptions) (string, error) {
 		return "", errors.New("cannot allocate clusters with more than 10 nodes")
 	}
 
-	clusterID := newRandomClusterID()
+	clusterID := opts.CLusterID
+	if clusterID == "" {
+		clusterID = newRandomClusterID()
+	}
 	timeoutTime := time.Now().Add(1 * time.Hour) // TODO: use the opts.Timeout
 
 	meta := ClusterMeta{

@@ -236,9 +236,10 @@ type CreateClusterSetupJSON struct {
 }
 
 type CreateClusterJSON struct {
-	Timeout string                  `json:"timeout"`
-	Nodes   []CreateClusterNodeJSON `json:"nodes"`
-	Setup   CreateClusterNodeJSON   `json:"setup"`
+	Timeout   string                  `json:"timeout"`
+	Nodes     []CreateClusterNodeJSON `json:"nodes"`
+	Setup     CreateClusterNodeJSON   `json:"setup"`
+	ClusterID string                  `json:"cluster_id"`
 }
 
 type NewClusterJSON struct {
@@ -260,7 +261,8 @@ func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clusterOpts := ClusterOptions{
-		Timeout: 1 * time.Hour,
+		Timeout:   1 * time.Hour,
+		CLusterID: reqData.ClusterID,
 	}
 
 	if reqData.Timeout != "" {
