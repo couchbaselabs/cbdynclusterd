@@ -9,10 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/chvck/cbcerthelper"
+	"github.com/couchbaselabs/cbcerthelper"
 
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
-
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 )
 

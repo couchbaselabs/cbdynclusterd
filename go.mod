@@ -4,8 +4,8 @@ go 1.13
 
 require (
 	github.com/Microsoft/go-winio v0.4.14 // indirect
-	github.com/chvck/cbcerthelper v0.0.0-20200412081141-375b5cc32194
 	github.com/couchbase/gocb v1.6.5
+	github.com/couchbaselabs/cbcerthelper v0.0.0-20200412115917-6e604a2b10e8
 	github.com/dgraph-io/badger v1.6.0
 	github.com/docker/distribution v2.7.1+incompatible // indirect
 	github.com/docker/docker v1.13.1
@@ -23,7 +23,7 @@ require (
 	github.com/pelletier/go-toml v1.6.0
 	github.com/pkg/errors v0.9.1
 	github.com/pkg/sftp v1.11.0
-	github.com/spf13/cobra v0.0.7
+	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.6.2
 	golang.org/x/crypto v0.0.0-20200403201458-baeed622b8d8

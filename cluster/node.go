@@ -20,7 +20,7 @@ import (
 
 	"github.com/pkg/sftp"
 
-	"github.com/chvck/cbcerthelper"
+	"github.com/couchbaselabs/cbcerthelper"
 
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/golang/glog"
