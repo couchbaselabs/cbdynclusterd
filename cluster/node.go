@@ -2,10 +2,14 @@ package cluster
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"os"
 	"path"
@@ -13,6 +17,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pkg/sftp"
+
+	"github.com/chvck/cbcerthelper"
 
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/golang/glog"
@@ -440,6 +448,10 @@ func (n *Node) EnableDeveloperPreview() error {
 }
 
 func (n *Node) CreateUser(user *helper.UserOption) error {
+	if user.Roles == nil {
+		roles := []string{"admin"}
+		user.Roles = &roles
+	}
 	body := fmt.Sprintf("name=%s&password=%s&roles=%s", user.Name, user.Password, strings.Join(*user.Roles, ","))
 	restParam := &helper.RestCall{
 		ExpectedCode: 200,
@@ -968,8 +980,69 @@ func newSession(sshLogin *helper.Cred) *ssh.Session {
 
 	session, err := connection.NewSession()
 	if err != nil {
-		glog.Fatalf("Failed to create session:%s", err)
+		glog.Fatalf(":%s", err)
 	}
 
 	return session
+}
+
+func (n *Node) SetupCert(ca *x509.Certificate, caPrivateKey *rsa.PrivateKey, now time.Time) error {
+	nodePrivKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	nodeCSR, _, err := cbcerthelper.CreateNodeCertReq(nodePrivKey)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate request: %w", err)
+	}
+
+	_, nodeCertBytes, err := cbcerthelper.CreateNodeCert(now, now.Add(365*24*time.Hour), caPrivateKey, n.HostName,
+		ca, nodeCSR)
+	if err != nil {
+		return fmt.Errorf("failed to create node certificate: %w", err)
+	}
+
+	client, err := newClient(n.SshLogin)
+	if err != nil {
+		return fmt.Errorf("failed to create node ssh client: %w", err)
+	}
+
+	sftpClient, err := sftp.NewClient(client)
+	if err != nil {
+		return fmt.Errorf("failed to create node sftp client: %w", err)
+	}
+
+	err = sftpClient.Mkdir("/opt/couchbase/var/lib/couchbase/inbox")
+	if err != nil {
+		log.Printf("Failed to create node inbox: %s\n", err)
+	}
+
+	err = cbcerthelper.WriteRemoteCert("/opt/couchbase/var/lib/couchbase/inbox/chain.pem", "CERTIFICATE",
+		nodeCertBytes, sftpClient)
+	if err != nil {
+		return fmt.Errorf("failed to write node certificate: %w", err)
+	}
+
+	err = cbcerthelper.WriteRemoteKey("/opt/couchbase/var/lib/couchbase/inbox/pkey.key", nodePrivKey, sftpClient)
+	if err != nil {
+		return fmt.Errorf("failed to write node key: %w", err)
+	}
+
+	err = cbcerthelper.UploadClusterCA(ca.Raw, n.RestLogin.Username, n.RestLogin.Password, n.HostName)
+	if err != nil {
+		return fmt.Errorf("failed to upload cluster CA: %w", err)
+	}
+
+	err = cbcerthelper.ReloadClusterCert(n.RestLogin.Username, n.RestLogin.Password, n.HostName)
+	if err != nil {
+		return fmt.Errorf("failed to reload cluster cert: %w", err)
+	}
+
+	err = cbcerthelper.EnableClientCertAuth(n.RestLogin.Username, n.RestLogin.Password, n.HostName)
+	if err != nil {
+		return fmt.Errorf("failed to enable client cert auth: %w", err)
+	}
+
+	return nil
 }

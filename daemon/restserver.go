@@ -483,6 +483,56 @@ func HttpAddBucket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
+type SetupClientCertAuthJSON struct {
+	UserName  string `json:"user"`
+	UserEmail string `json:"email"`
+}
+
+type CertAuthResultJSON struct {
+	CACert     []byte `json:"cacert"`
+	ClientKey  []byte `json:"client_key"`
+	ClientCert []byte `json:"client_cert"`
+}
+
+func HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	var reqData SetupClientCertAuthJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	cluster, err := getCluster(reqCtx, clusterID)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	certData, err := SetupCertAuth(SetupClientCertAuthOptions{
+		Nodes: cluster.Nodes,
+		Conf:  reqData,
+	})
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	writeJsonResponse(w, CertAuthResultJSON{
+		CACert:     certData.CACert,
+		ClientKey:  certData.ClientKey,
+		ClientCert: certData.ClientCert,
+	})
+	return
+}
+
 func createRESTRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/", HttpRoot)
@@ -495,5 +545,6 @@ func createRESTRouter() *mux.Router {
 	r.HandleFunc("/cluster/{cluster_id}/setup", HttpSetupCluster).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}", HttpDeleteCluster).Methods("DELETE")
 	r.HandleFunc("/cluster/{cluster_id}/add-bucket", HttpAddBucket).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/setup-cert-auth", HttpSetupClientCertAuth).Methods("POST")
 	return r
 }
