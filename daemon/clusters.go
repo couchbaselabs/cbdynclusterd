@@ -183,43 +183,10 @@ func allocateCluster(ctx context.Context, opts ClusterOptions) (string, error) {
 	if len(nodesToAllocate) > 0 {
 		// We assume that all nodes are using the same server version.
 		node := nodesToAllocate[0]
-		containerImage := node.VersionInfo.toImageName()
 
-		if dockerRegistry == "" {
-			err = checkBuildExists(fmt.Sprintf("%s/%s", node.VersionInfo.toURL(), node.VersionInfo.toPkgName()))
-			if err != nil {
-				return "", err
-			}
-
-			// If the image is already built then this will won't rebuild
-			log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
-			err = imageBuild(ctx, node.VersionInfo, helper.DockerFilePath+"couchbase/centos7") // TODO: might want this to be a config too
-			if err != nil {
-				return "", err
-			}
-		} else {
-			log.Printf("Pulling %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
-			err = imagePull(ctx, containerImage)
-			if err != nil {
-				// assume that pull failed because the image didn't exist on the registry
-				// check the build exists and then build the image
-				err = checkBuildExists(fmt.Sprintf("%s/%s", node.VersionInfo.toURL(), node.VersionInfo.toPkgName()))
-				if err != nil {
-					return "", err
-				}
-
-				log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
-				err = imageBuild(ctx, node.VersionInfo, helper.DockerFilePath+"couchbase/centos7") // TODO: might want this to be a config too
-				if err != nil {
-					return "", err
-				}
-
-				log.Printf("Pushing %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
-				err = imagePush(ctx, node.VersionInfo)
-				if err != nil {
-					return "", err
-				}
-			}
+		err := ensureImageExists(ctx, node.VersionInfo, clusterID)
+		if err != nil {
+			return "", err
 		}
 	}
 
@@ -245,6 +212,51 @@ func allocateCluster(ctx context.Context, opts ClusterOptions) (string, error) {
 	}
 
 	return clusterID, nil
+}
+
+func ensureImageExists(ctx context.Context, versionInfo *NodeVersion, clusterID string) error {
+	containerImage := versionInfo.toImageName()
+	if dockerRegistry == "" {
+		err := checkBuildExists(fmt.Sprintf("%s/%s", versionInfo.toURL(), versionInfo.toPkgName()))
+		if err != nil {
+			return err
+		}
+
+		// If the image is already built then this will won't rebuild
+		if clusterID == "" {
+			log.Printf("Building %s image (requested by: %s)", containerImage, ContextUser(ctx))
+		} else {
+			log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
+		}
+		err = imageBuild(ctx, versionInfo, helper.DockerFilePath+"couchbase/centos7") // TODO: might want this to be a config too
+		if err != nil {
+			return err
+		}
+	} else {
+		log.Printf("Pulling %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
+		err := imagePull(ctx, containerImage)
+		if err != nil {
+			// assume that pull failed because the image didn't exist on the registry
+			// check the build exists and then build the image
+			err = checkBuildExists(fmt.Sprintf("%s/%s", versionInfo.toURL(), versionInfo.toPkgName()))
+			if err != nil {
+				return err
+			}
+
+			log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
+			err = imageBuild(ctx, versionInfo, helper.DockerFilePath+"couchbase/centos7") // TODO: might want this to be a config too
+			if err != nil {
+				return err
+			}
+
+			log.Printf("Pushing %s image for cluster %s (requested by: %s)", containerImage, clusterID, ContextUser(ctx))
+			err = imagePush(ctx, versionInfo)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func refreshCluster(ctx context.Context, clusterID string, newTimeout time.Duration) error {

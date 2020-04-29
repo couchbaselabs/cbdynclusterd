@@ -533,6 +533,46 @@ func HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+type BuildImageJSON struct {
+	ServerVersion string `json:"server_version"`
+}
+
+type BuildImageResponseJSON struct {
+	ImageName string `json:"image_name"`
+}
+
+func HttpBuildImage(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	var reqData BuildImageJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	nodeVersion, err := parseServerVersion(reqData.ServerVersion)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	err = ensureImageExists(reqCtx, nodeVersion, "")
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	imageJSON := BuildImageResponseJSON{
+		ImageName: nodeVersion.toImageName(),
+	}
+	writeJsonResponse(w, imageJSON)
+}
+
 func createRESTRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/", HttpRoot)
@@ -546,5 +586,6 @@ func createRESTRouter() *mux.Router {
 	r.HandleFunc("/cluster/{cluster_id}", HttpDeleteCluster).Methods("DELETE")
 	r.HandleFunc("/cluster/{cluster_id}/add-bucket", HttpAddBucket).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}/setup-cert-auth", HttpSetupClientCertAuth).Methods("POST")
+	r.HandleFunc("/images", HttpBuildImage).Methods("POST")
 	return r
 }
