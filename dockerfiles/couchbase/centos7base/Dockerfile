@@ -27,9 +27,9 @@ COPY functions /etc/init.d/
 #   keyserver.ubuntu.com
 #   hkp://keyserver.ubuntu.com:80
 #   pgp.mit.edu
-RUN gpg --keyserver pgp.mit.edu --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 \
+RUN gpg --batch --keyserver hkps://keys.openpgp.org --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 \
     && curl -o /usr/local/bin/gosu -sSL "https://github.com/tianon/gosu/releases/download/1.4/gosu-amd64" \
     && curl -o /usr/local/bin/gosu.asc -sSL "https://github.com/tianon/gosu/releases/download/1.4/gosu-amd64.asc" \
-    && gpg --verify /usr/local/bin/gosu.asc \
+    && gpg --batch  --verify /usr/local/bin/gosu.asc /usr/local/bin/gosu \
     && rm /usr/local/bin/gosu.asc \
     && chmod +x /usr/local/bin/gosu
