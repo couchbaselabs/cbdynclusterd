@@ -386,6 +386,24 @@ func (n *Node) CreateBucket(conf *Bucket) error {
 	return err
 }
 
+func (n *Node) CreateCollection(conf *Collection) error {
+	posts := url.Values{}
+	posts.Add("name", conf.Name)
+
+	restParam := &helper.RestCall{
+		ExpectedCode: 200,
+		Method:       "POST",
+		Path:         fmt.Sprintf("/pools/default/buckets/%s/collections/%s", conf.BucketName, conf.ScopeName),
+		Cred:         n.RestLogin,
+		Body:         posts.Encode(),
+		Header:       map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}
+
+	_, err := helper.RestRetryer(helper.RestRetry, restParam, helper.GetResponse)
+
+	return err
+}
+
 func (n *Node) WaitForBucketReady() error {
 	chRes := make(chan []RespNode)
 	for {
