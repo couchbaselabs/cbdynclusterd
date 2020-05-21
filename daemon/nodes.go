@@ -131,6 +131,7 @@ func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts
 		AutoRemove:  true,
 		NetworkMode: container.NetworkMode(NetworkName),
 		DNS:         dns,
+		CapAdd:      []string{"NET_ADMIN"},
 	}, nil, containerName)
 	if err != nil {
 		return "", err
