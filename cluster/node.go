@@ -366,6 +366,11 @@ func (n *Node) ChangeBucketCompression(bucket, mode string) error {
 }
 
 func (n *Node) CreateBucket(conf *Bucket) error {
+	if helper.SampleBucketsCount[conf.Name] != 0 {
+		glog.Info("Loading sample bucket %s", conf.Name)
+		return n.LoadSample(conf.Name)
+	}
+
 	body := fmt.Sprintf("bucketType=%s&name=%s&ramQuotaMB=%s&replicaNumber=%d",
 		conf.Type, conf.Name, conf.RamQuotaMB,
 		conf.ReplicaCount)
@@ -384,6 +389,29 @@ func (n *Node) CreateBucket(conf *Bucket) error {
 	_, err := helper.RestRetryer(helper.RestRetry, restParam, helper.GetResponse)
 
 	return err
+}
+
+func (n *Node) LoadSample(s string) error {
+	body := fmt.Sprintf("[\"%s\"]", s)
+	restParam := &helper.RestCall{
+		ExpectedCode: 202,
+		Method:       "POST",
+		Path:         helper.PSampleBucket,
+		Cred:         n.RestLogin,
+		Body:         body,
+		Header:       map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}
+
+	_, err := helper.RestRetryer(helper.RestRetry, restParam, helper.GetResponse)
+	if err != nil {
+		return err
+	}
+
+	if err = n.WaitForBucketHealthy(s); err != nil {
+		return err
+	}
+
+	return n.PollSampleBucket(s)
 }
 
 func (n *Node) CreateCollection(conf *Collection) error {
@@ -432,6 +460,23 @@ func (n *Node) WaitForBucketReady() error {
 			return errors.New("Timeout while waiting for bucket ready")
 		}
 	}
+}
+
+//WaitForBucketHealthy will wait until bucket with name s exists and that it is ready
+func (n *Node) WaitForBucketHealthy(b string) error {
+	params := &helper.RestCall{
+		ExpectedCode: 200,
+		RetryOnCode:  404,
+		Method:       "GET",
+		Path:         helper.PBuckets + "/" + b,
+		Cred:         n.RestLogin,
+	}
+	_, err := helper.RestRetryer(10, params, helper.GetResponse)
+	if err != nil {
+		return err
+	}
+
+	return 	n.WaitForBucketReady()
 }
 
 func (n *Node) SetStorageMode(storageMode string) error {
@@ -653,6 +698,45 @@ func parseRebalanceProgress(status map[string]interface{}) int {
 	}
 	glog.Infof("progress=%f, cnt=%d", progress, cnt)
 	return int(progress*100) / cnt
+}
+
+func (n *Node) PollSampleBucket(s string) error {
+	params := &helper.RestCall{
+		ExpectedCode: 200,
+		Method:       "GET",
+		Path:         helper.PBuckets + "/" + s,
+		Cred:         n.RestLogin,
+	}
+
+	info := make(chan map[string]interface{})
+	loadTimeout := time.NewTimer(5 * time.Minute)
+
+	for {
+		resp, err := helper.RestRetryer(helper.RestRetry, params, helper.GetResponse)
+		if err != nil {
+			return err
+		}
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+			return err
+		}
+
+		go func() {
+			glog.Infof("parsed=%v", parsed)
+			info <- parsed
+		}()
+		select {
+		case status := <-info:
+			basicStats := status["basicStats"].(map[string]interface{})
+			if basicStats["itemCount"].(float64) == helper.SampleBucketsCount[s] {
+				glog.Infof("Sample bucket %s is loaded", s)
+				return nil
+			}
+		case <-loadTimeout.C:
+			return errors.New("Timeout while loading sample bucket.")
+		}
+	}
 }
 
 func (n *Node) restCallToAux(fn func(RespNode, *helper.Cred, chan error), restLogin *helper.Cred) error {

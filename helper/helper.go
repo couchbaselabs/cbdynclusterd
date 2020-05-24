@@ -32,6 +32,11 @@ var (
 	StopWorkload               = false
 	WorkloadRunTime            = 10 * time.Second
 	WorkloadRampTime           = 10 * time.Second
+	SampleBucketsCount         = map[string]float64{
+		"travel-sample":  31591,
+		"beer-sample":    7303,
+		"gamesim-sample": 586,
+	}
 )
 
 const (
@@ -65,6 +70,7 @@ const (
 	PFts               = "/api/index"
 	PRename            = "/node/controller/rename"
 	PDeveloperPreview  = "/settings/developerPreview"
+	PSampleBucket      = "/sampleBuckets/install"
 
 	Domain        = "/domain"
 	DomainPostfix = ".couchbase.com"
