@@ -483,6 +483,38 @@ func HttpAddBucket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
+type AddSampleBucketJSON struct {
+	SampleBucket string `json:"sample_bucket"`
+	UseHostname  bool   `json:"use_hostname"`
+}
+
+func HttpAddSampleBucket(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	var reqData AddSampleBucketJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	err = addSampleBucket(reqCtx, clusterID, AddSampleOptions{
+		Conf: reqData,
+	})
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	w.WriteHeader(200)
+}
+
 type AddCollectionJSON struct {
 	Name        string `json:"name"`
 	ScopeName   string `json:"scope_name"`
@@ -619,6 +651,7 @@ func createRESTRouter() *mux.Router {
 	r.HandleFunc("/cluster/{cluster_id}/setup", HttpSetupCluster).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}", HttpDeleteCluster).Methods("DELETE")
 	r.HandleFunc("/cluster/{cluster_id}/add-bucket", HttpAddBucket).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/add-sample-bucket", HttpAddSampleBucket).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}/add-collection", HttpAddCollection).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}/setup-cert-auth", HttpSetupClientCertAuth).Methods("POST")
 	r.HandleFunc("/images", HttpBuildImage).Methods("POST")

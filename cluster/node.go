@@ -366,11 +366,6 @@ func (n *Node) ChangeBucketCompression(bucket, mode string) error {
 }
 
 func (n *Node) CreateBucket(conf *Bucket) error {
-	if helper.SampleBucketsCount[conf.Name] != 0 {
-		glog.Info("Loading sample bucket %s", conf.Name)
-		return n.LoadSample(conf.Name)
-	}
-
 	body := fmt.Sprintf("bucketType=%s&name=%s&ramQuotaMB=%s&replicaNumber=%d",
 		conf.Type, conf.Name, conf.RamQuotaMB,
 		conf.ReplicaCount)
@@ -708,8 +703,7 @@ func (n *Node) PollSampleBucket(s string) error {
 		Cred:         n.RestLogin,
 	}
 
-	info := make(chan map[string]interface{})
-	loadTimeout := time.NewTimer(5 * time.Minute)
+	deadline := time.Now().Add(4 * time.Minute)
 
 	for {
 		resp, err := helper.RestRetryer(helper.RestRetry, params, helper.GetResponse)
@@ -722,18 +716,12 @@ func (n *Node) PollSampleBucket(s string) error {
 			return err
 		}
 
-		go func() {
-			glog.Infof("parsed=%v", parsed)
-			info <- parsed
-		}()
-		select {
-		case status := <-info:
-			basicStats := status["basicStats"].(map[string]interface{})
-			if basicStats["itemCount"].(float64) == helper.SampleBucketsCount[s] {
-				glog.Infof("Sample bucket %s is loaded", s)
-				return nil
-			}
-		case <-loadTimeout.C:
+		basicStats := parsed["basicStats"].(map[string]interface{})
+		if basicStats["itemCount"].(float64) == helper.SampleBucketsCount[s] {
+			glog.Infof("Sample bucket %s is loaded", s)
+			return nil
+		}
+		if time.Now().After(deadline) {
 			return errors.New("Timeout while loading sample bucket.")
 		}
 	}
