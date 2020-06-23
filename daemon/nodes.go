@@ -107,6 +107,39 @@ func parseServerVersion(version string) (*NodeVersion, error) {
 	return &nodeVersion, nil
 }
 
+func aliasServerVersion(version string) (string, error) {
+	//Check for aliasing format: M.m-stable/release
+	buildParts := strings.Split(version, "-")
+	if len(buildParts) < 2 {
+		return version, nil
+	}
+
+	versionParts := strings.Split(buildParts[0], ".")
+	if len(versionParts) > 2 {
+		return version, nil
+	}
+
+	p, err := GetProductsMap()
+	if err != nil {
+		return "", err
+	}
+
+	var serverBuild string
+	if buildParts[1] == "release" {
+		serverBuild = p["couchbase-server"][buildParts[0]].Release
+	} else if buildParts[1] == "stable" {
+		//Stable version should always have a result
+		serverBuild = p["couchbase-server"][buildParts[0]].Stable
+	}
+
+	if serverBuild == "" {
+		return "", fmt.Errorf("No build version found for %s", version)
+	}
+
+	log.Printf("Using %s version for %s -> %s", buildParts[1], buildParts[0], serverBuild)
+	return serverBuild, nil
+}
+
 func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts NodeOptions) (string, error) {
 	log.Printf("Allocating node for cluster %s (requested by: %s)", clusterID, ContextUser(ctx))
 

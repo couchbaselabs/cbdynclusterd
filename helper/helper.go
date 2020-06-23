@@ -76,6 +76,10 @@ const (
 	DomainPostfix = ".couchbase.com"
 
 	DockerFilePath = "dockerfiles/"
+
+	AliasRepo     = "https://github.com/willbroadbelt/cb-alias.git" //TODO: Move to couchbaselabs
+	AliasRepoPath = "/opt/cbdynclusterd/alias"
+	AliasFileName = "products.yml"
 )
 
 type UserOption struct {

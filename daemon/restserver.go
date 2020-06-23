@@ -273,8 +273,18 @@ func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 		clusterOpts.Timeout = clusterTimeout
 	}
 
+	//Get/refresh alias repo
+	if err := GetConfigRepo(); err != nil {
+		log.Printf("Get config failed: %v", err)
+	}
+
 	for _, node := range reqData.Nodes {
-		nodeVersion, err := parseServerVersion(node.ServerVersion)
+		finalVersion, err := aliasServerVersion(node.ServerVersion)
+		if err != nil {
+			writeJSONError(w, err)
+			return
+		}
+		nodeVersion, err := parseServerVersion(finalVersion)
 		if err != nil {
 			writeJSONError(w, err)
 			return
@@ -283,7 +293,7 @@ func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 		nodeOpts := NodeOptions{
 			Name:          node.Name,
 			Platform:      node.Platform,
-			ServerVersion: node.ServerVersion,
+			ServerVersion: finalVersion,
 			VersionInfo:   nodeVersion,
 		}
 		clusterOpts.Nodes = append(clusterOpts.Nodes, nodeOpts)
