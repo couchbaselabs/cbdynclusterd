@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/go-git/go-git/v5"
 	"gopkg.in/yaml.v2"
@@ -41,7 +42,7 @@ func GetConfigRepo() error {
 		Progress:          os.Stdout,
 	})
 
-	if err == git.ErrRepositoryAlreadyExists {
+	if errors.Is(err, git.ErrRepositoryAlreadyExists) {
 		return pullConfigRepo()
 	}
 	return err
@@ -60,7 +61,7 @@ func pullConfigRepo() error {
 
 	log.Printf("Pulling products repo")
 	err = w.Pull(&git.PullOptions{RemoteName: "origin"})
-	if err == git.NoErrAlreadyUpToDate {
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
 		log.Printf("%v", err)
 		return nil
 	}

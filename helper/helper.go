@@ -77,7 +77,7 @@ const (
 
 	DockerFilePath = "dockerfiles/"
 
-	AliasRepo     = "https://github.com/willbroadbelt/cb-alias.git" //TODO: Move to couchbaselabs
+	AliasRepo     = "https://github.com/couchbaselabs/cb-alias.git"
 	AliasRepoPath = "/opt/cbdynclusterd/alias"
 	AliasFileName = "products.yml"
 )
