@@ -366,9 +366,12 @@ func (n *Node) ChangeBucketCompression(bucket, mode string) error {
 }
 
 func (n *Node) CreateBucket(conf *Bucket) error {
-	body := fmt.Sprintf("bucketType=%s&name=%s&ramQuotaMB=%s&replicaNumber=%d",
-		conf.Type, conf.Name, conf.RamQuotaMB,
-		conf.ReplicaCount)
+	body := fmt.Sprintf("bucketType=%s&name=%s&ramQuotaMB=%s",
+		conf.Type, conf.Name, conf.RamQuotaMB)
+
+	if conf.Type != helper.BucketMemcached {
+		body = fmt.Sprintf("%s&replicaNumber=%d", body, conf.ReplicaCount)
+	}
 	if conf.Type == helper.BucketEphemeral {
 		body = fmt.Sprintf("%s&evictionPolicy=%s", body, conf.EphEvictionPolicy)
 	}
@@ -471,7 +474,7 @@ func (n *Node) WaitForBucketHealthy(b string) error {
 		return err
 	}
 
-	return 	n.WaitForBucketReady()
+	return n.WaitForBucketReady()
 }
 
 func (n *Node) SetStorageMode(storageMode string) error {
