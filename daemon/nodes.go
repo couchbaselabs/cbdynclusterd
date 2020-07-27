@@ -18,6 +18,13 @@ import (
 
 var NetworkName = "macvlan0"
 
+type Edition string
+
+const (
+	Enterprise Edition = "enterprise"
+	Community  Edition = "community"
+)
+
 type NodeOptions struct {
 	Name          string
 	Platform      string
@@ -29,6 +36,7 @@ type NodeVersion struct {
 	Version string
 	Flavor  string
 	Build   string
+	Edition Edition
 }
 
 func (nv *NodeVersion) toTagName() string {
@@ -39,14 +47,14 @@ func (nv *NodeVersion) toTagName() string {
 }
 
 func (nv *NodeVersion) toImageName() string {
-	return fmt.Sprintf("%s/dynclsr-couchbase_%s", dockerRegistry, nv.toTagName())
+	return fmt.Sprintf("%s/dynclsr-couchbase_%s_%s", dockerRegistry, nv.Edition, nv.toTagName())
 }
 
 func (nv *NodeVersion) toPkgName() string {
 	if nv.Build == "" {
-		return fmt.Sprintf("couchbase-server-enterprise-%s-centos7.x86_64.rpm", nv.Version)
+		return fmt.Sprintf("couchbase-server-%s-%s-centos7.x86_64.rpm", nv.Edition, nv.Version)
 	}
-	return fmt.Sprintf("couchbase-server-enterprise-%s-%s-centos7.x86_64.rpm", nv.Version, nv.Build)
+	return fmt.Sprintf("couchbase-server-%s-%s-%s-centos7.x86_64.rpm", nv.Edition, nv.Version, nv.Build)
 }
 
 func (nv *NodeVersion) toURL() string {
@@ -91,7 +99,7 @@ func flavorFromVersion(version string) (string, error) {
 	return flavor, nil
 }
 
-func parseServerVersion(version string) (*NodeVersion, error) {
+func parseServerVersion(version string, useCE bool) (*NodeVersion, error) {
 	nodeVersion := NodeVersion{}
 	versionParts := strings.Split(version, "-")
 	flavor, err := flavorFromVersion(versionParts[0])
@@ -102,6 +110,11 @@ func parseServerVersion(version string) (*NodeVersion, error) {
 	nodeVersion.Flavor = flavor
 	if len(versionParts) > 1 {
 		nodeVersion.Build = versionParts[1]
+	}
+	if useCE {
+		nodeVersion.Edition = Community
+	} else {
+		nodeVersion.Edition = Enterprise
 	}
 
 	return &nodeVersion, nil

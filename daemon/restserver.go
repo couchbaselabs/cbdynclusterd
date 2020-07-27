@@ -219,9 +219,10 @@ func HttpGetClusters(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateClusterNodeJSON struct {
-	Name          string `json:"name"`
-	Platform      string `json:"platform"`
-	ServerVersion string `json:"server_version"`
+	Name                string `json:"name"`
+	Platform            string `json:"platform"`
+	ServerVersion       string `json:"server_version"`
+	UseCommunityEdition bool   `json:"community_edition"`
 }
 
 type CreateClusterSetupJSON struct {
@@ -284,7 +285,7 @@ func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, err)
 			return
 		}
-		nodeVersion, err := parseServerVersion(finalVersion)
+		nodeVersion, err := parseServerVersion(finalVersion, node.UseCommunityEdition)
 		if err != nil {
 			writeJSONError(w, err)
 			return
@@ -610,7 +611,8 @@ func HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 type BuildImageJSON struct {
-	ServerVersion string `json:"server_version"`
+	ServerVersion       string `json:"server_version"`
+	UseCommunityEdition bool   `json:"community_edition"`
 }
 
 type BuildImageResponseJSON struct {
@@ -631,7 +633,7 @@ func HttpBuildImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nodeVersion, err := parseServerVersion(reqData.ServerVersion)
+	nodeVersion, err := parseServerVersion(reqData.ServerVersion, reqData.UseCommunityEdition)
 	if err != nil {
 		writeJSONError(w, err)
 		return
