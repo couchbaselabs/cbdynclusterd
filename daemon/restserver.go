@@ -465,6 +465,7 @@ type AddBucketJSON struct {
 	UseHostname  bool   `json:"use_hostname"`
 	ReplicaCount int    `json:"replica_count"`
 	BucketType   string `json:"bucket_type"`
+	EvictionPolicy   string `json:"eviction_policy"`
 }
 
 func HttpAddBucket(w http.ResponseWriter, r *http.Request) {
