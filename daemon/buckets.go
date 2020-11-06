@@ -22,7 +22,6 @@ type AddSampleOptions struct {
 
 func addBucket(ctx context.Context, clusterID string, opts AddBucketOptions) error {
 	log.Printf("Adding bucket %s to cluster %s (requested by: %s)", opts.Conf.Name, clusterID, ContextUser(ctx))
-	log.Printf("Bucket has Eviction policy  %s ", opts.Conf.EvictionPolicy)
 
 	c, err := getCluster(ctx, clusterID)
 	if err != nil {
