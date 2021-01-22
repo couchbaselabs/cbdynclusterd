@@ -706,7 +706,7 @@ func (n *Node) PollSampleBucket(s string) error {
 		Cred:         n.RestLogin,
 	}
 
-	deadline := time.Now().Add(10 * time.Minute)
+	deadline := time.Now().Add(5 * time.Minute)
 
 	for {
 		resp, err := helper.RestRetryer(helper.RestRetry, params, helper.GetResponse)
@@ -720,7 +720,7 @@ func (n *Node) PollSampleBucket(s string) error {
 		}
 
 		basicStats := parsed["basicStats"].(map[string]interface{})
-		if basicStats["itemCount"].(float64) == helper.SampleBucketsCount[s] {
+		if basicStats["itemCount"].(float64) == helper.SampleBucketsCount[s] ||  basicStats["itemCount"].(float64) == 2 * helper.SampleBucketsCount[s]{
 			glog.Infof("Sample bucket %s is loaded", s)
 			return nil
 		}
