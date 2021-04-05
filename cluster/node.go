@@ -706,7 +706,7 @@ func (n *Node) PollSampleBucket(s string) error {
 		Cred:         n.RestLogin,
 	}
 
-	deadline := time.Now().Add(5 * time.Minute)
+	deadline := time.Now().Add(8 * time.Minute)
 
 	for {
 		resp, err := helper.RestRetryer(helper.RestRetry, params, helper.GetResponse)
