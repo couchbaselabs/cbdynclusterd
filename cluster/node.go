@@ -419,7 +419,7 @@ func (n *Node) CreateCollection(conf *Collection) error {
 	restParam := &helper.RestCall{
 		ExpectedCode: 200,
 		Method:       "POST",
-		Path:         fmt.Sprintf("/pools/default/buckets/%s/collections/%s", conf.BucketName, conf.ScopeName),
+		Path:         fmt.Sprintf("/pools/default/buckets/%s/scopes/%s/collections", conf.BucketName, conf.ScopeName),
 		Cred:         n.RestLogin,
 		Body:         posts.Encode(),
 		Header:       map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
@@ -720,7 +720,7 @@ func (n *Node) PollSampleBucket(s string) error {
 		}
 
 		basicStats := parsed["basicStats"].(map[string]interface{})
-		if basicStats["itemCount"].(float64) == helper.SampleBucketsCount[s] ||  basicStats["itemCount"].(float64) == 2 * helper.SampleBucketsCount[s]{
+		if basicStats["itemCount"].(float64) == helper.SampleBucketsCount[s] || basicStats["itemCount"].(float64) == 2*helper.SampleBucketsCount[s] {
 			glog.Infof("Sample bucket %s is loaded", s)
 			return nil
 		}
