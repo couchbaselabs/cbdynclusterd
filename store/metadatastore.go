@@ -1,13 +1,12 @@
-package daemon
+package store
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
-
 	"github.com/dgraph-io/badger"
 	"github.com/golang/glog"
+	"time"
 )
 
 type ClusterMetaJSON struct {
@@ -24,10 +23,27 @@ type MetaDataStore struct {
 	db *badger.DB
 }
 
-var DEFAULT_CLUSTER_META ClusterMeta = ClusterMeta{
-	Owner:   "unknown",
-	Timeout: DEFAULT_CLUSTER_TIMEOUT,
+type ReadOnlyMetaDataStore struct {
+	store *MetaDataStore
 }
+
+func NewReadOnlyMetaDataStore(store *MetaDataStore) *ReadOnlyMetaDataStore {
+	return &ReadOnlyMetaDataStore{
+		store: store,
+	}
+}
+
+func (store *ReadOnlyMetaDataStore) GetClusterMeta(clusterID string) (ClusterMeta, error) {
+	return store.store.GetClusterMeta(clusterID)
+}
+
+var (
+	DEFAULT_CLUSTER_TIMEOUT = time.Date(2222, 1, 1, 0, 0, 0, 0, time.UTC)
+	DEFAULT_CLUSTER_META    = ClusterMeta{
+		Owner:   "unknown",
+		Timeout: DEFAULT_CLUSTER_TIMEOUT,
+	}
+)
 
 func (store *MetaDataStore) serializeMeta(meta ClusterMeta) ([]byte, error) {
 	metaJSON := ClusterMetaJSON{

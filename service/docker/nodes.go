@@ -1,15 +1,15 @@
-package daemon
+package docker
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
 	"log"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -25,7 +25,14 @@ const (
 	Community  Edition = "community"
 )
 
-type NodeOptions struct {
+type CreateNodeOptions struct {
+	Name                string
+	Platform            string
+	ServerVersion       string
+	UseCommunityEdition bool
+}
+
+type nodeOptions struct {
 	Name          string
 	Platform      string
 	ServerVersion string
@@ -46,7 +53,7 @@ func (nv *NodeVersion) toTagName() string {
 	return fmt.Sprintf("%s-%s.centos7", nv.Version, nv.Build)
 }
 
-func (nv *NodeVersion) toImageName() string {
+func (nv *NodeVersion) toImageName(dockerRegistry string) string {
 	return fmt.Sprintf("%s/dynclsr-couchbase_%s_%s", dockerRegistry, nv.Edition, nv.toTagName())
 }
 
@@ -60,9 +67,9 @@ func (nv *NodeVersion) toPkgName() string {
 func (nv *NodeVersion) toURL() string {
 	// If there's no build number specified then the target is a release
 	if nv.Build == "" {
-		return fmt.Sprintf("%s%s", cluster.ReleaseUrl, nv.Version)
+		return fmt.Sprintf("%s%s", ReleaseUrl, nv.Version)
 	}
-	return fmt.Sprintf("%s%s/%s", cluster.BuildUrl, nv.Flavor, nv.Build)
+	return fmt.Sprintf("%s%s/%s", BuildUrl, nv.Flavor, nv.Build)
 }
 
 var versionToFlavor = map[int]map[int]string{
@@ -120,7 +127,7 @@ func parseServerVersion(version string, useCE bool) (*NodeVersion, error) {
 	return &nodeVersion, nil
 }
 
-func aliasServerVersion(version string) (string, error) {
+func (ds *DockerService) aliasServerVersion(version string) (string, error) {
 	//Check for aliasing format: M.m-stable/release
 	buildParts := strings.Split(version, "-")
 	if len(buildParts) < 2 {
@@ -132,7 +139,7 @@ func aliasServerVersion(version string) (string, error) {
 		return version, nil
 	}
 
-	p, err := GetProductsMap()
+	p, err := ds.getProductsMap()
 	if err != nil {
 		return "", err
 	}
@@ -153,20 +160,20 @@ func aliasServerVersion(version string) (string, error) {
 	return serverBuild, nil
 }
 
-func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts NodeOptions) (string, error) {
-	log.Printf("Allocating node for cluster %s (requested by: %s)", clusterID, ContextUser(ctx))
+func (ds *DockerService) allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts nodeOptions) (string, error) {
+	log.Printf("Allocating node for cluster %s (requested by: %s)", clusterID, dyncontext.ContextUser(ctx))
 
 	containerName := fmt.Sprintf("dynclsr-%s-%s", clusterID, opts.Name)
-	containerImage := opts.VersionInfo.toImageName()
+	containerImage := opts.VersionInfo.toImageName(ds.dockerRegistry)
 
 	var dns []string
-	if dnsSvcHost != "" {
-		dns = append(dns, dnsSvcHost)
+	if ds.dnsSvcHost != "" {
+		dns = append(dns, ds.dnsSvcHost)
 	}
-	createResult, err := docker.ContainerCreate(context.Background(), &container.Config{
+	createResult, err := ds.docker.ContainerCreate(context.Background(), &container.Config{
 		Image: containerImage,
 		Labels: map[string]string{
-			"com.couchbase.dyncluster.creator":                ContextUser(ctx),
+			"com.couchbase.dyncluster.creator":                dyncontext.ContextUser(ctx),
 			"com.couchbase.dyncluster.cluster_id":             clusterID,
 			"com.couchbase.dyncluster.node_name":              opts.Name,
 			"com.couchbase.dyncluster.initial_server_version": opts.ServerVersion,
@@ -183,11 +190,11 @@ func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts
 		return "", err
 	}
 
-	err = docker.ContainerStart(context.Background(), createResult.ID, types.ContainerStartOptions{})
+	err = ds.docker.ContainerStart(context.Background(), createResult.ID, types.ContainerStartOptions{})
 	if err != nil {
 		return "", err
 	}
-	containerJSON, err := docker.ContainerInspect(context.Background(), createResult.ID)
+	containerJSON, err := ds.docker.ContainerInspect(context.Background(), createResult.ID)
 	if err != nil {
 		return "", err
 	}
@@ -195,18 +202,18 @@ func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts
 	ipv6 := containerJSON.NetworkSettings.Networks[NetworkName].GlobalIPv6Address
 	containerHostName := containerName + ".couchbase.com"
 
-	if dnsSvcHost != "" {
+	if ds.dnsSvcHost != "" {
 		if ipv4 != "" {
-			glog.Infof("register %s => %s on %s\n", ipv4, containerHostName, dnsSvcHost)
-			body, err := registerDomainName(containerHostName, ipv4)
+			glog.Infof("register %s => %s on %s\n", ipv4, containerHostName, ds.dnsSvcHost)
+			body, err := ds.registerDomainName(containerHostName, ipv4)
 			if err != nil {
 				glog.Warningf("Failed registering IPv4:%s, %s", err, body)
 			}
 		}
 
 		if ipv6 != "" {
-			glog.Infof("register %s => %s on %s\n", ipv6, containerHostName, dnsSvcHost)
-			body, err := registerDomainName(containerHostName, ipv6)
+			glog.Infof("register %s => %s on %s\n", ipv6, containerHostName, ds.dnsSvcHost)
+			body, err := ds.registerDomainName(containerHostName, ipv6)
 			glog.Warningf("Failed registering IPv6:%s, %s", err, body)
 		}
 	}
@@ -215,13 +222,13 @@ func allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts
 }
 
 // assign hostname to the IP in DNS server
-func registerDomainName(hostname, ip string) (string, error) {
+func (ds *DockerService) registerDomainName(hostname, ip string) (string, error) {
 	restParam := &helper.RestCall{
 		ExpectedCode: 200,
 		ContentType:  "application/json",
 		Method:       "PUT",
 		Cred: &helper.Cred{
-			Hostname: dnsSvcHost,
+			Hostname: ds.dnsSvcHost,
 			Port:     80,
 		},
 		Path: helper.Domain + "/" + hostname,
@@ -230,10 +237,10 @@ func registerDomainName(hostname, ip string) (string, error) {
 	return helper.RestRetryer(helper.RestRetry, restParam, helper.GetResponse)
 }
 
-func killNode(ctx context.Context, containerID string) error {
-	log.Printf("Killing node %s (requested by: %s)", containerID, ContextUser(ctx))
+func (ds *DockerService) killNode(ctx context.Context, containerID string) error {
+	log.Printf("Killing node %s (requested by: %s)", containerID, dyncontext.ContextUser(ctx))
 
-	err := docker.ContainerStop(context.Background(), containerID, nil)
+	err := ds.docker.ContainerStop(context.Background(), containerID, nil)
 	if err != nil {
 		return err
 	}

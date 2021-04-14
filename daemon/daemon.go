@@ -2,10 +2,16 @@ package daemon
 
 import (
 	"context"
+	"github.com/couchbaselabs/cbdynclusterd/cluster"
+	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
+	"github.com/couchbaselabs/cbdynclusterd/helper"
+	"github.com/couchbaselabs/cbdynclusterd/service/docker"
+	"github.com/couchbaselabs/cbdynclusterd/store"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	goflag "flag"
@@ -24,16 +30,14 @@ import (
 
 var defaultCfgFileName = ".cbdynclusterd.toml"
 
-var docker *client.Client
-var metaStore *MetaDataStore
-var systemCtx context.Context
-
 var dockerRegistry = "dockerhub.build.couchbase.com"
 var dockerHost = "/var/run/docker.sock"
 var dnsSvcHost = ""
 
+var aliasRepoPath = helper.AliasRepoPath
+
 var cfgFileFlag string
-var dockerRegistryFlag, dockerHostFlag, dnsSvcHostFlag string
+var dockerRegistryFlag, dockerHostFlag, dnsSvcHostFlag, aliasRepoPathFlag string
 var dockerPortFlag int32
 
 var rootCmd = &cobra.Command{
@@ -62,17 +66,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&dockerRegistryFlag, "docker-registry", dockerRegistry, "docker registry to pull/push images")
 	rootCmd.PersistentFlags().StringVar(&dockerHostFlag, "docker-host", dockerHost, "docker host where containers are running (i.e. tcp://127.0.0.1:2376)")
 	rootCmd.PersistentFlags().StringVar(&dnsSvcHostFlag, "dns-host", dnsSvcHost, "Restful DNS server IP")
+	rootCmd.PersistentFlags().StringVar(&aliasRepoPathFlag, "alias-repo", dnsSvcHost, "Path to the alias repo")
 
 	rootCmd.PersistentFlags().Int32Var(&dockerPortFlag, "docker-port", 0, "")
 	rootCmd.PersistentFlags().MarkDeprecated("docker-port", "Deprecated flag to specify the port of the docker host")
 }
 
 func initConfig() {
-
-	if cfgFileFlag != "" {
-		// if user specified the config file, use it
-		viper.SetConfigFile(cfgFileFlag)
-	} else {
+	if cfgFileFlag == "" {
 		// use default config file
 		home, err := homedir.Dir()
 		if err != nil {
@@ -90,7 +91,9 @@ func initConfig() {
 				return
 			}
 		}
-
+	} else {
+		// if user specified the config file, use it
+		viper.SetConfigFile(cfgFileFlag)
 	}
 
 	viper.AutomaticEnv()
@@ -116,10 +119,12 @@ func initConfig() {
 	dockerHostFlag = getStringArg("docker-host")
 	dockerPortFlag = getInt32Arg("docker-port")
 	dnsSvcHostFlag = getStringArg("dns-host")
+	aliasRepoPathFlag = getStringArg("alias-repo")
 
 	dockerRegistry = dockerRegistryFlag
 	dockerHost = dockerHostFlag
 	dnsSvcHost = dnsSvcHostFlag
+	aliasRepoPath = aliasRepoPathFlag
 
 	if dockerPortFlag > 0 {
 		dockerHost = fmt.Sprintf("tcp://%s:%d", dockerHostFlag, dockerPortFlag)
@@ -143,41 +148,31 @@ func createConfigFile(configFile string) error {
 	return ioutil.WriteFile(configFile, []byte(tmap.String()), 0644)
 }
 
-func openMeta() error {
-	meta := &MetaDataStore{}
+type daemon struct {
+	metaStore *store.MetaDataStore
+	systemCtx context.Context
+
+	dockerService *docker.DockerService
+}
+
+func (d *daemon) openMeta() error {
+	meta := &store.MetaDataStore{}
 
 	err := meta.Open("./data")
 	if err != nil {
 		return err
 	}
 
-	metaStore = meta
+	d.metaStore = meta
 	return nil
 }
 
-func connectDocker() error {
-	cli, err := client.NewClient(dockerHost, "1.38", nil, nil)
-	if err != nil {
-		return err
-	}
-
-	docker = cli
-	return nil
+func (d *daemon) connectDocker() (*client.Client, error) {
+	return client.NewClient(dockerHost, "1.38", nil, nil)
 }
 
-func connectRegistry(ctx context.Context, uri string) error {
-	_, err := docker.RegistryLogin(ctx, types.AuthConfig{
-		ServerAddress: uri,
-	})
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func hasMacvlan0() bool {
-	networks, err := docker.NetworkList(context.Background(), types.NetworkListOptions{})
+func (d *daemon) hasMacvlan0(cli *client.Client) bool {
+	networks, err := cli.NetworkList(context.Background(), types.NetworkListOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -191,84 +186,92 @@ func hasMacvlan0() bool {
 	return false
 }
 
-func cleanupClusters() error {
+func (d *daemon) getAllClusters(ctx context.Context) ([]*cluster.Cluster, error) {
+	clusters, err := d.dockerService.GetAllClusters(ctx)
+	if err != nil {
+		log.Printf("Failed to get all clusters %v\n", err)
+		return nil, err
+	}
+
+	return clusters, nil
+}
+
+func (d *daemon) cleanupClusters() {
 	log.Printf("Cleaning up dead clusters")
 
-	clusters, err := getAllClusters(systemCtx)
+	clusters, err := d.getAllClusters(d.systemCtx)
 	if err != nil {
-		return err
+		log.Printf("Failed to get all clusters %v\n", err)
 	}
 
 	var clustersToKill []string
-	for _, cluster := range clusters {
-		if cluster.Timeout.Before(time.Now()) {
-			clustersToKill = append(clustersToKill, cluster.ID)
+	for _, c := range clusters {
+		if c.Timeout.Before(time.Now()) {
+			clustersToKill = append(clustersToKill, c.ID)
 		}
 	}
 
-	signal := make(chan error)
-
+	var wg sync.WaitGroup
 	for _, clusterID := range clustersToKill {
+		wg.Add(1)
 		go func(clusterID string) {
-			signal <- killCluster(systemCtx, clusterID)
+			if err := d.dockerService.KillCluster(d.systemCtx, clusterID); err != nil {
+				log.Printf("Failed to kill cluster %s: %v\n", clusterID, err)
+			}
+			wg.Done()
 		}(clusterID)
 	}
 
-	var killError error
-	for range clustersToKill {
-		err := <-signal
-		if err != nil && killError == nil {
-			killError = err
-		}
-	}
-	if killError != nil {
-		return killError
-	}
-
-	return nil
+	return
 }
 
-func getAndPrintClusters(ctx context.Context) {
-	clusters, err := getAllClusters(ctx)
+func (d *daemon) getAndPrintClusters() {
+	clusters, err := d.getAllClusters(d.systemCtx)
 	if err != nil {
 		log.Printf("Failed to fetch all clusters: %+v", err)
-	} else {
-		log.Printf("Clusters:")
-		for _, cluster := range clusters {
-			log.Printf("  %s [Owner: %s, Creator: %s, Timeout: %s]", cluster.ID, cluster.Owner, cluster.Creator, cluster.Timeout.Sub(time.Now()).Round(time.Second))
-			for _, node := range cluster.Nodes {
-				log.Printf("    %-16s  %-20s %-10s %-20s", node.ContainerID, node.Name, node.InitialServerVersion, node.IPv4Address)
-			}
+		return
+	}
+
+	log.Printf("Clusters:")
+	for _, c := range clusters {
+		log.Printf("  %s [Owner: %s, Creator: %s, Timeout: %s]", c.ID, c.Owner, c.Creator, c.Timeout.Sub(time.Now()).Round(time.Second))
+		for _, node := range c.Nodes {
+			log.Printf("    %-16s  %-20s %-10s %-20s", node.ContainerID, node.Name, node.InitialServerVersion, node.IPv4Address)
 		}
 	}
 }
 
-func startDaemon() {
+func newDaemon() *daemon {
+	d := &daemon{}
 	// Open the meta-data database used to tracker ownership and expiry of clusters
-	err := openMeta()
+	err := d.openMeta()
 	if err != nil {
-		log.Printf("Failed to open meta db: %s", err)
-		return
+		log.Fatalf("Failed to open meta db: %s", err)
 	}
 
 	// Connect to docker
-	err = connectDocker()
+	cli, err := d.connectDocker()
 	if err != nil {
-		log.Printf("Failed to connect to docker: %s", err)
-		return
+		log.Fatalf("Failed to connect to docker: %s", err)
 	}
 
 	// Check to make sure that the macvlan0 network is available in docker,
-	// this is neccessary for the server instances we create to be available
+	// this is necessary for the server instances we create to be available
 	// on the public network.
-	if !hasMacvlan0() {
+	if !d.hasMacvlan0(cli) {
 		log.Printf("Failed to locate `macvlan0` network on docker host")
-		return
 	}
 
-	// Create a system context to use for system actions (like cleanups)
-	systemCtx = NewContext(context.Background(), "system", true)
+	readOnlyStore := store.NewReadOnlyMetaDataStore(d.metaStore)
+	d.dockerService = docker.NewDockerService(cli, dockerRegistry, dnsSvcHost, aliasRepoPath, readOnlyStore)
 
+	// Create a system context to use for system actions (like cleanups)
+	d.systemCtx = dyncontext.NewContext(context.Background(), "system", true)
+
+	return d
+}
+
+func (d *daemon) Run() {
 	shutdownSig := make(chan struct{})
 	cleanupClosedSig := make(chan struct{})
 
@@ -277,62 +280,21 @@ func startDaemon() {
 		for {
 			select {
 			case <-shutdownSig:
-				cleanupClosedSig <- struct{}{}
+				close(cleanupClosedSig)
 				return
 			case <-time.After(5 * time.Minute):
 			}
 
-			err := cleanupClusters()
-			if err != nil {
-				log.Printf("Failed to cleanup old clusters: %s", err)
-			}
+			d.cleanupClusters()
 		}
 	}()
 
-	getAndPrintClusters(systemCtx)
-
-	/*
-		userCtx := NewContext(context.Background(), "brett@couchbase.com", false)
-
-		getAndPrintClusters(systemCtx)
-
-		err = killAllClusters(systemCtx)
-		if err != nil {
-			log.Printf("Failed to kill all clusters: %s", err)
-			return
-		}
-
-		clusterOpts := ClusterOptions{
-			Nodes: []NodeOptions{
-				NodeOptions{
-					Name:          "",
-					ServerVersion: "5.5.0",
-				},
-				NodeOptions{
-					Name:          "",
-					ServerVersion: "5.5.0",
-				},
-				NodeOptions{
-					Name:          "",
-					ServerVersion: "5.5.0",
-				},
-			},
-		}
-
-		clusterID, err := allocateCluster(userCtx, clusterOpts)
-		if err != nil {
-			log.Printf("Failed to create new cluster: %s", err)
-		} else {
-			log.Printf("New Cluster: %s", clusterID)
-		}
-
-		getAndPrintClusters(userCtx)
-	*/
+	d.getAndPrintClusters()
 
 	// Set up our REST server
 	restServer := http.Server{
 		Addr:    ":19923",
-		Handler: createRESTRouter(),
+		Handler: d.createRESTRouter(),
 	}
 
 	// Set up a signal watcher for graceful shutdown
@@ -348,22 +310,26 @@ func startDaemon() {
 
 	// Start listening now
 	log.Printf("Daemon is starting on %s", restServer.Addr)
-	if err = restServer.ListenAndServe(); err != nil {
-		log.Printf("Error:%s", err)
+	if err := restServer.ListenAndServe(); err != nil {
+		log.Fatalf("Error:%s", err)
 	}
 
 	// Signal all our running goroutines to shut down
-	shutdownSig <- struct{}{}
+	close(shutdownSig)
 
 	// Wait for the periodic cleanup routine to finish
 	<-cleanupClosedSig
 
 	// Close the meta-data database
-	err = metaStore.Close()
-	if err != nil {
-		log.Printf("Failed to close meta db: %s", err)
+	if err := d.metaStore.Close(); err != nil {
+		log.Fatalf("Failed to close meta db: %s", err)
 	}
 
 	// Let everyone know everything worked good
 	log.Printf("Graceful shutdown completed.")
+}
+
+func startDaemon() {
+	d := newDaemon()
+	d.Run()
 }

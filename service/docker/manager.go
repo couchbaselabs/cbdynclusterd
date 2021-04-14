@@ -1,4 +1,4 @@
-package cluster
+package docker
 
 import (
 	"bufio"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"io"
 	"os"
 	"strconv"
@@ -99,7 +100,6 @@ func (m *Manager) ScpToLocalDir(hostname, src, dest string) error {
 }
 
 func (m *Manager) StartCluster() (string, error) {
-
 	var refInfo RefInfo
 	existingCluster := make(map[string][]*Node)
 	// Ensure we can connect to the REST port
@@ -532,7 +532,7 @@ func (m *Manager) SetupBucket(bucketName, bucketType, bucketPassword string) err
 	default:
 		bType = helper.BucketCouchbase
 	}
-	bc := Bucket{
+	bc := cluster.Bucket{
 		Name:              bucketName,
 		Type:              bType,
 		RamQuotaMB:        "256",
