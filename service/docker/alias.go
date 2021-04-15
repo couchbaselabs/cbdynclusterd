@@ -13,8 +13,8 @@ import (
 type Products map[string]map[string]AliasVersion
 
 type AliasVersion struct {
-	Release string `yaml:release,omitempty`
-	Stable  string `yaml:stable,omitempty`
+	Release string `yaml:"release,omitempty"`
+	Stable  string `yaml:"stable,omitempty"`
 }
 
 //Returns the product map from the local products yaml file
