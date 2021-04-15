@@ -2,110 +2,21 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
 	"github.com/couchbaselabs/cbdynclusterd/service"
 	"github.com/couchbaselabs/cbdynclusterd/service/docker"
 	"github.com/couchbaselabs/cbdynclusterd/store"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/gorilla/mux"
 )
 
 var Version string
-
-type ErrorJSON struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
-}
-
-func jsonifyError(err error) ErrorJSON {
-	jsonErr := ErrorJSON{}
-	jsonErr.Error.Message = err.Error()
-	return jsonErr
-}
-
-type RefreshJSON struct {
-	Timeout string `json:"timeout"`
-}
-
-type NodeJSON struct {
-	ID                   string `json:"id"`
-	ContainerName        string `json:"container_name"`
-	State                string `json:"state"`
-	Name                 string `json:"name"`
-	InitialServerVersion string `json:"initial_server_version"`
-	IPv4Address          string `json:"ipv4_address"`
-	IPv6Address          string `json:"ipv6_address"`
-}
-
-func jsonifyNode(node *cluster.Node) NodeJSON {
-	return NodeJSON{
-		ID:                   node.ContainerID,
-		ContainerName:        node.ContainerName,
-		State:                node.State,
-		Name:                 node.Name,
-		InitialServerVersion: node.InitialServerVersion,
-		IPv4Address:          node.IPv4Address,
-		IPv6Address:          node.IPv6Address,
-	}
-}
-
-func UnjsonifyNode(jsonNode *NodeJSON) *cluster.Node {
-	return &cluster.Node{
-		ContainerID:          jsonNode.ID,
-		ContainerName:        jsonNode.ContainerName,
-		State:                jsonNode.State,
-		Name:                 jsonNode.Name,
-		InitialServerVersion: jsonNode.InitialServerVersion,
-		IPv4Address:          jsonNode.IPv4Address,
-		IPv6Address:          jsonNode.IPv6Address,
-	}
-}
-
-type DockerHostJSON struct {
-	Hostname string `json:"hostname"`
-	Port     string `json:"port"`
-}
-
-type VersionJSON struct {
-	Version string `json:"version"`
-}
-
-type ClusterJSON struct {
-	ID         string     `json:"id"`
-	Creator    string     `json:"creator"`
-	Owner      string     `json:"owner"`
-	Timeout    string     `json:"timeout"`
-	Nodes      []NodeJSON `json:"nodes"`
-	EntryPoint string     `json:"entry"`
-}
-
-func jsonifyCluster(cluster *cluster.Cluster) ClusterJSON {
-	jsonCluster := ClusterJSON{
-		ID:         cluster.ID,
-		Creator:    cluster.Creator,
-		Owner:      cluster.Owner,
-		Timeout:    cluster.Timeout.Format(time.RFC3339),
-		EntryPoint: cluster.EntryPoint,
-	}
-
-	for _, node := range cluster.Nodes {
-		jsonNode := jsonifyNode(node)
-		jsonCluster.Nodes = append(jsonCluster.Nodes, jsonNode)
-	}
-
-	return jsonCluster
-}
 
 func getHttpContext(r *http.Request) (context.Context, error) {
 	userHeader := r.Header.Get("cbdn-user")
@@ -124,39 +35,6 @@ func getHttpContext(r *http.Request) (context.Context, error) {
 	}
 
 	return dyncontext.NewContext(r.Context(), user, ignoreOwnership), nil
-}
-
-func writeJSONError(w http.ResponseWriter, err error) {
-	jsonErr := jsonifyError(err)
-
-	jsonBytes, err := json.Marshal(jsonErr)
-	if err != nil {
-		log.Printf("Failed to marshal error JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-	w.Write(jsonBytes)
-}
-
-func writeJsonResponse(w http.ResponseWriter, data interface{}) {
-	jsonBytes, err := json.Marshal(data)
-	if err != nil {
-		log.Printf("Failed to marshal response JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	w.Write(jsonBytes)
-}
-
-func readJsonRequest(r *http.Request, data interface{}) error {
-	jsonDec := json.NewDecoder(r.Body)
-	return jsonDec.Decode(data)
 }
 
 func (d *daemon) HttpRoot(w http.ResponseWriter, r *http.Request) {
@@ -186,34 +64,6 @@ func (d *daemon) HttpGetClusters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJsonResponse(w, jsonClusters)
-}
-
-type CreateClusterNodeJSON struct {
-	Name                string `json:"name"`
-	Platform            string `json:"platform"`
-	ServerVersion       string `json:"server_version"`
-	UseCommunityEdition bool   `json:"community_edition"`
-}
-
-type CreateClusterSetupJSON struct {
-	Services            []string             `json:"services"`
-	StorageMode         string               `json:"storage_mode"`
-	RamQuota            int                  `json:"ram_quota"`
-	UseHostname         bool                 `json:"use_hostname"`
-	UseIpv6             bool                 `json:"use_ipv6"`
-	Bucket              *helper.BucketOption `json:"bucket"`
-	User                *helper.UserOption   `json:"user"`
-	UseDeveloperPreview bool                 `json:"developer_preview"`
-}
-
-type CreateClusterJSON struct {
-	Timeout string                  `json:"timeout"`
-	Nodes   []CreateClusterNodeJSON `json:"nodes"`
-	Setup   CreateClusterNodeJSON   `json:"setup"`
-}
-
-type NewClusterJSON struct {
-	ID string `json:"id"`
 }
 
 func (d *daemon) HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
@@ -305,10 +155,6 @@ func (d *daemon) HttpGetCluster(w http.ResponseWriter, r *http.Request) {
 	jsonCluster := jsonifyCluster(c)
 
 	writeJsonResponse(w, jsonCluster)
-}
-
-type UpdateClusterJSON struct {
-	Timeout string `json:"timeout"`
 }
 
 func (d *daemon) HttpGetDockerHost(w http.ResponseWriter, r *http.Request) {
@@ -411,7 +257,10 @@ func (d *daemon) HttpUpdateCluster(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		d.refreshCluster(reqCtx, clusterID, newTimeout)
+		if err := d.refreshCluster(reqCtx, clusterID, newTimeout); err != nil {
+			writeJSONError(w, err)
+			return
+		}
 
 		w.WriteHeader(200)
 		return
@@ -436,16 +285,6 @@ func (d *daemon) HttpDeleteCluster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(200)
-}
-
-type AddBucketJSON struct {
-	Name           string `json:"name"`
-	StorageMode    string `json:"storage_mode"`
-	RamQuota       int    `json:"ram_quota"`
-	UseHostname    bool   `json:"use_hostname"`
-	ReplicaCount   int    `json:"replica_count"`
-	BucketType     string `json:"bucket_type"`
-	EvictionPolicy string `json:"eviction_policy"`
 }
 
 func (d *daemon) HttpAddBucket(w http.ResponseWriter, r *http.Request) {
@@ -481,11 +320,6 @@ func (d *daemon) HttpAddBucket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-type AddSampleBucketJSON struct {
-	SampleBucket string `json:"sample_bucket"`
-	UseHostname  bool   `json:"use_hostname"`
-}
-
 func (d *daemon) HttpAddSampleBucket(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
@@ -512,13 +346,6 @@ func (d *daemon) HttpAddSampleBucket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(200)
-}
-
-type AddCollectionJSON struct {
-	Name        string `json:"name"`
-	ScopeName   string `json:"scope_name"`
-	BucketName  string `json:"bucket_name"`
-	UseHostname bool   `json:"use_hostname"`
 }
 
 func (d *daemon) HttpAddCollection(w http.ResponseWriter, r *http.Request) {
@@ -549,17 +376,6 @@ func (d *daemon) HttpAddCollection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(200)
-}
-
-type SetupClientCertAuthJSON struct {
-	UserName  string `json:"user"`
-	UserEmail string `json:"email"`
-}
-
-type CertAuthResultJSON struct {
-	CACert     []byte `json:"cacert"`
-	ClientKey  []byte `json:"client_key"`
-	ClientCert []byte `json:"client_cert"`
 }
 
 func (d *daemon) HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request) {
@@ -600,15 +416,6 @@ func (d *daemon) HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request)
 		ClientCert: certData.ClientCert,
 	})
 	return
-}
-
-type BuildImageJSON struct {
-	ServerVersion       string `json:"server_version"`
-	UseCommunityEdition bool   `json:"community_edition"`
-}
-
-type BuildImageResponseJSON struct {
-	ImageName string `json:"image_name"`
 }
 
 func (d *daemon) HttpBuildImage(w http.ResponseWriter, r *http.Request) {
