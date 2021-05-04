@@ -2,140 +2,25 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
+	"github.com/couchbaselabs/cbdynclusterd/helper"
+	"github.com/couchbaselabs/cbdynclusterd/service"
+	"github.com/couchbaselabs/cbdynclusterd/service/cloud"
+	"github.com/couchbaselabs/cbdynclusterd/service/docker"
+	"github.com/couchbaselabs/cbdynclusterd/store"
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/gorilla/mux"
 )
 
 var Version string
-
-type ErrorJSON struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
-}
-
-func jsonifyError(err error) ErrorJSON {
-	jsonErr := ErrorJSON{}
-	jsonErr.Error.Message = err.Error()
-	return jsonErr
-}
-
-type RefreshJSON struct {
-	Timeout string `json:"timeout"`
-}
-
-type NodeJSON struct {
-	ID                   string `json:"id"`
-	ContainerName        string `json:"container_name"`
-	State                string `json:"state"`
-	Name                 string `json:"name"`
-	InitialServerVersion string `json:"initial_server_version"`
-	IPv4Address          string `json:"ipv4_address"`
-	IPv6Address          string `json:"ipv6_address"`
-}
-
-func jsonifyNode(node *Node) NodeJSON {
-	return NodeJSON{
-		ID:                   node.ContainerID,
-		ContainerName:        node.ContainerName,
-		State:                node.State,
-		Name:                 node.Name,
-		InitialServerVersion: node.InitialServerVersion,
-		IPv4Address:          node.IPv4Address,
-		IPv6Address:          node.IPv6Address,
-	}
-}
-
-func UnjsonifyNode(jsonNode *NodeJSON) *Node {
-	return &Node{
-		ContainerID:          jsonNode.ID,
-		ContainerName:        jsonNode.ContainerName,
-		State:                jsonNode.State,
-		Name:                 jsonNode.Name,
-		InitialServerVersion: jsonNode.InitialServerVersion,
-		IPv4Address:          jsonNode.IPv4Address,
-		IPv6Address:          jsonNode.IPv6Address,
-	}
-}
-
-type DockerHostJSON struct {
-	Hostname string `json:"hostname"`
-	Port     string `json:"port"`
-}
-
-type VersionJSON struct {
-	Version string `json:"version"`
-}
-
-type ClusterJSON struct {
-	ID         string     `json:"id"`
-	Creator    string     `json:"creator"`
-	Owner      string     `json:"owner"`
-	Timeout    string     `json:"timeout"`
-	Nodes      []NodeJSON `json:"nodes"`
-	EntryPoint string     `json:"entry"`
-}
-
-func jsonifyCluster(cluster *Cluster) ClusterJSON {
-	jsonCluster := ClusterJSON{
-		ID:         cluster.ID,
-		Creator:    cluster.Creator,
-		Owner:      cluster.Owner,
-		Timeout:    cluster.Timeout.Format(time.RFC3339),
-		EntryPoint: cluster.EntryPoint,
-	}
-
-	for _, node := range cluster.Nodes {
-		jsonNode := jsonifyNode(node)
-		jsonCluster.Nodes = append(jsonCluster.Nodes, jsonNode)
-	}
-
-	return jsonCluster
-}
-
-func UnjsonifyDockerHost(dockerHost *DockerHostJSON) (string, error) {
-	if dockerHost == nil || dockerHost.Hostname == "" || dockerHost.Port == "" {
-		return "", errors.New("Docker hostname or port is empty")
-	}
-	return fmt.Sprintf("%s:%s", dockerHost.Hostname, dockerHost.Port), nil
-}
-
-func UnjsonifyVersion(version *VersionJSON) (string, error) {
-	if version == nil || version.Version == "" {
-		return "", errors.New("cbdynclusterd version is empty")
-	}
-	return version.Version, nil
-}
-
-func UnjsonifyCluster(jsonCluster *ClusterJSON) (*Cluster, error) {
-	cluster := &Cluster{}
-	cluster.ID = jsonCluster.ID
-	cluster.Creator = jsonCluster.Creator
-	cluster.Owner = jsonCluster.Owner
-	cluster.EntryPoint = jsonCluster.EntryPoint
-
-	clusterTimeout, err := time.Parse(time.RFC3339, jsonCluster.Timeout)
-	if err != nil {
-		return nil, err
-	}
-	cluster.Timeout = clusterTimeout
-
-	for _, jsonNode := range jsonCluster.Nodes {
-		node := UnjsonifyNode(&jsonNode)
-		cluster.Nodes = append(cluster.Nodes, node)
-	}
-
-	return cluster, nil
-}
 
 func getHttpContext(r *http.Request) (context.Context, error) {
 	userHeader := r.Header.Get("cbdn-user")
@@ -153,56 +38,23 @@ func getHttpContext(r *http.Request) (context.Context, error) {
 		ignoreOwnership = true
 	}
 
-	return NewContext(r.Context(), user, ignoreOwnership), nil
+	return dyncontext.NewContext(r.Context(), user, ignoreOwnership), nil
 }
 
-func writeJSONError(w http.ResponseWriter, err error) {
-	jsonErr := jsonifyError(err)
-
-	jsonBytes, err := json.Marshal(jsonErr)
-	if err != nil {
-		log.Printf("Failed to marshal error JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-	w.Write(jsonBytes)
-}
-
-func writeJsonResponse(w http.ResponseWriter, data interface{}) {
-	jsonBytes, err := json.Marshal(data)
-	if err != nil {
-		log.Printf("Failed to marshal response JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	w.Write(jsonBytes)
-}
-
-func readJsonRequest(r *http.Request, data interface{}) error {
-	jsonDec := json.NewDecoder(r.Body)
-	return jsonDec.Decode(data)
-}
-
-func HttpRoot(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpRoot(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("This is the cbdyncluster daemon!\n"))
 }
 
 type GetClustersJSON []ClusterJSON
 
-func HttpGetClusters(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpGetClusters(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
 		return
 	}
 
-	clusters, err := getAllClusters(reqCtx)
+	clusters, err := d.getAllClusters(reqCtx)
 	if err != nil {
 		writeJSONError(w, err)
 		return
@@ -210,43 +62,15 @@ func HttpGetClusters(w http.ResponseWriter, r *http.Request) {
 
 	jsonClusters := make(GetClustersJSON, 0)
 
-	for _, cluster := range clusters {
-		jsonCluster := jsonifyCluster(cluster)
+	for _, c := range clusters {
+		jsonCluster := jsonifyCluster(c)
 		jsonClusters = append(jsonClusters, jsonCluster)
 	}
 
 	writeJsonResponse(w, jsonClusters)
 }
 
-type CreateClusterNodeJSON struct {
-	Name                string `json:"name"`
-	Platform            string `json:"platform"`
-	ServerVersion       string `json:"server_version"`
-	UseCommunityEdition bool   `json:"community_edition"`
-}
-
-type CreateClusterSetupJSON struct {
-	Services            []string             `json:"services"`
-	StorageMode         string               `json:"storage_mode"`
-	RamQuota            int                  `json:"ram_quota"`
-	UseHostname         bool                 `json:"use_hostname"`
-	UseIpv6             bool                 `json:"use_ipv6"`
-	Bucket              *helper.BucketOption `json:"bucket"`
-	User                *helper.UserOption   `json:"user"`
-	UseDeveloperPreview bool                 `json:"developer_preview"`
-}
-
-type CreateClusterJSON struct {
-	Timeout string                  `json:"timeout"`
-	Nodes   []CreateClusterNodeJSON `json:"nodes"`
-	Setup   CreateClusterNodeJSON   `json:"setup"`
-}
-
-type NewClusterJSON struct {
-	ID string `json:"id"`
-}
-
-func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -260,9 +84,7 @@ func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clusterOpts := ClusterOptions{
-		Timeout: 1 * time.Hour,
-	}
+	timeout := 1 * time.Hour
 
 	if reqData.Timeout != "" {
 		clusterTimeout, err := time.ParseDuration(reqData.Timeout)
@@ -271,37 +93,43 @@ func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		clusterOpts.Timeout = clusterTimeout
+		timeout = clusterTimeout
 	}
 
-	//Get/refresh alias repo
-	if err := GetConfigRepo(); err != nil {
-		log.Printf("Get config failed: %v", err)
+	if timeout < 0 {
+		writeJSONError(w, errors.New("must specify a valid timeout for the cluster"))
+		return
+	}
+	if timeout > 2*7*24*time.Hour {
+		writeJSONError(w, errors.New("cannot allocate clusters for longer than 2 weeks"))
+		return
+	}
+	clusterOpts := docker.AllocateClusterOptions{
+		Deadline: time.Now().Add(timeout),
 	}
 
 	for _, node := range reqData.Nodes {
-		finalVersion, err := aliasServerVersion(node.ServerVersion)
-		if err != nil {
-			writeJSONError(w, err)
-			return
-		}
-		nodeVersion, err := parseServerVersion(finalVersion, node.UseCommunityEdition)
-		if err != nil {
-			writeJSONError(w, err)
-			return
-		}
-
-		nodeOpts := NodeOptions{
-			Name:          node.Name,
-			Platform:      node.Platform,
-			ServerVersion: finalVersion,
-			VersionInfo:   nodeVersion,
+		nodeOpts := docker.CreateNodeOptions{
+			Name:                node.Name,
+			Platform:            node.Platform,
+			ServerVersion:       node.ServerVersion,
+			UseCommunityEdition: node.UseCommunityEdition,
 		}
 		clusterOpts.Nodes = append(clusterOpts.Nodes, nodeOpts)
 	}
 
-	clusterID, err := allocateCluster(reqCtx, clusterOpts)
+	clusterID, err := d.dockerService.AllocateCluster(reqCtx, clusterOpts)
 	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	meta := store.ClusterMeta{
+		Owner:    dyncontext.ContextUser(reqCtx),
+		Timeout:  clusterOpts.Deadline,
+		Platform: store.ClusterPlatformDocker,
+	}
+	if err := d.metaStore.CreateClusterMeta(clusterID, meta); err != nil {
 		writeJSONError(w, err)
 		return
 	}
@@ -314,7 +142,7 @@ func HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 
 type GetClusterJSON ClusterJSON
 
-func HttpGetCluster(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpGetCluster(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -323,22 +151,35 @@ func HttpGetCluster(w http.ResponseWriter, r *http.Request) {
 
 	clusterID := mux.Vars(r)["cluster_id"]
 
-	cluster, err := getCluster(reqCtx, clusterID)
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	c, err := s.GetCluster(reqCtx, clusterID)
 	if err != nil {
 		writeJSONError(w, err)
 		return
 	}
 
-	jsonCluster := jsonifyCluster(cluster)
+	jsonCluster := jsonifyCluster(c)
 
 	writeJsonResponse(w, jsonCluster)
 }
 
-type UpdateClusterJSON struct {
-	Timeout string `json:"timeout"`
-}
-
-func HttpGetDockerHost(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpGetDockerHost(w http.ResponseWriter, r *http.Request) {
 	hostURI, err := url.Parse(dockerHost)
 	if err != nil {
 		writeJSONError(w, err)
@@ -366,7 +207,7 @@ func HttpGetVersion(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func HttpSetupCluster(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpSetupCluster(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -382,33 +223,40 @@ func HttpSetupCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cluster, err := getCluster(reqCtx, clusterID)
+	c, err := d.dockerService.GetCluster(reqCtx, clusterID)
 	if err != nil {
 		writeJSONError(w, err)
 		return
 	}
-	if len(cluster.Nodes) != len(reqData.Services) {
+	if len(c.Nodes) != len(reqData.Services) {
 		writeJSONError(w, errors.New("services does not map to number of nodes"))
 		return
 	}
 
-	epnode, err := SetupCluster(&ClusterSetupOptions{
-		Nodes: cluster.Nodes,
-		Conf:  reqData,
+	epnode, err := d.dockerService.SetupCluster(docker.ClusterSetupOptions{
+		Nodes:               c.Nodes,
+		Services:            reqData.Services,
+		UseHostname:         reqData.UseHostname,
+		UseIpv6:             reqData.UseIpv6,
+		MemoryQuota:         strconv.Itoa(reqData.RamQuota),
+		User:                reqData.User,
+		StorageMode:         reqData.StorageMode,
+		Bucket:              reqData.Bucket,
+		UseDeveloperPreview: reqData.UseDeveloperPreview,
 	})
 	if err != nil {
 		writeJSONError(w, err)
 		return
 	}
 
-	cluster.EntryPoint = epnode
+	c.EntryPoint = epnode
 
-	jsonCluster := jsonifyCluster(cluster)
+	jsonCluster := jsonifyCluster(c)
 	writeJsonResponse(w, jsonCluster)
 	return
 }
 
-func HttpUpdateCluster(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpUpdateCluster(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -431,7 +279,10 @@ func HttpUpdateCluster(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		refreshCluster(reqCtx, clusterID, newTimeout)
+		if err := d.refreshCluster(reqCtx, clusterID, newTimeout); err != nil {
+			writeJSONError(w, err)
+			return
+		}
 
 		w.WriteHeader(200)
 		return
@@ -440,7 +291,7 @@ func HttpUpdateCluster(w http.ResponseWriter, r *http.Request) {
 	writeJSONError(w, errors.New("not sure what you wanted to do"))
 }
 
-func HttpDeleteCluster(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpDeleteCluster(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -449,7 +300,24 @@ func HttpDeleteCluster(w http.ResponseWriter, r *http.Request) {
 
 	clusterID := mux.Vars(r)["cluster_id"]
 
-	err = killCluster(reqCtx, clusterID)
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	err = s.KillCluster(reqCtx, clusterID)
 	if err != nil {
 		writeJSONError(w, err)
 		return
@@ -458,17 +326,7 @@ func HttpDeleteCluster(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-type AddBucketJSON struct {
-	Name         string `json:"name"`
-	StorageMode  string `json:"storage_mode"`
-	RamQuota     int    `json:"ram_quota"`
-	UseHostname  bool   `json:"use_hostname"`
-	ReplicaCount int    `json:"replica_count"`
-	BucketType   string `json:"bucket_type"`
-	EvictionPolicy   string `json:"eviction_policy"`
-}
-
-func HttpAddBucket(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpAddBucket(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -484,8 +342,31 @@ func HttpAddBucket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = addBucket(reqCtx, clusterID, AddBucketOptions{
-		Conf: reqData,
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	err = s.AddBucket(reqCtx, clusterID, service.AddBucketOptions{
+		Name:           reqData.Name,
+		StorageMode:    reqData.StorageMode,
+		RamQuota:       reqData.RamQuota,
+		UseHostname:    reqData.UseHostname,
+		ReplicaCount:   reqData.ReplicaCount,
+		BucketType:     reqData.BucketType,
+		EvictionPolicy: reqData.EvictionPolicy,
 	})
 	if err != nil {
 		writeJSONError(w, err)
@@ -495,12 +376,7 @@ func HttpAddBucket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-type AddSampleBucketJSON struct {
-	SampleBucket string `json:"sample_bucket"`
-	UseHostname  bool   `json:"use_hostname"`
-}
-
-func HttpAddSampleBucket(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpAddSampleBucket(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -516,8 +392,26 @@ func HttpAddSampleBucket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = addSampleBucket(reqCtx, clusterID, AddSampleOptions{
-		Conf: reqData,
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	err = s.AddSampleBucket(reqCtx, clusterID, service.AddSampleOptions{
+		SampleBucket: reqData.SampleBucket,
+		UseHostname:  reqData.UseHostname,
 	})
 	if err != nil {
 		writeJSONError(w, err)
@@ -527,14 +421,7 @@ func HttpAddSampleBucket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-type AddCollectionJSON struct {
-	Name        string `json:"name"`
-	ScopeName   string `json:"scope_name"`
-	BucketName  string `json:"bucket_name"`
-	UseHostname bool   `json:"use_hostname"`
-}
-
-func HttpAddCollection(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpAddCollection(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -550,8 +437,28 @@ func HttpAddCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = addCollection(reqCtx, clusterID, AddCollectionOptions{
-		Conf: reqData,
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	err = s.AddCollection(reqCtx, clusterID, service.AddCollectionOptions{
+		Name:        reqData.Name,
+		ScopeName:   reqData.ScopeName,
+		BucketName:  reqData.BucketName,
+		UseHostname: reqData.UseHostname,
 	})
 	if err != nil {
 		writeJSONError(w, err)
@@ -561,18 +468,136 @@ func HttpAddCollection(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 
-type SetupClientCertAuthJSON struct {
-	UserName  string `json:"user"`
-	UserEmail string `json:"email"`
+func (d *daemon) HttpAddIP(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	var reqData AddIPJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	err = s.AddIP(reqCtx, clusterID, reqData.IP)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	w.WriteHeader(200)
 }
 
-type CertAuthResultJSON struct {
-	CACert     []byte `json:"cacert"`
-	ClientKey  []byte `json:"client_key"`
-	ClientCert []byte `json:"client_cert"`
+func (d *daemon) HttpAddUser(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	var reqData AddUserJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	err = s.AddUser(reqCtx, clusterID, reqData.User, reqData.Bucket)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	w.WriteHeader(200)
 }
 
-func HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpConnString(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	var reqData ConnStringJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	connstr, err := s.ConnString(reqCtx, clusterID, reqData.UseSSL)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	connStrJson := ConnStringResponseJSON{
+		ConnStr: connstr,
+	}
+	writeJsonResponse(w, connStrJson)
+}
+
+func (d *daemon) HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -588,15 +613,26 @@ func HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cluster, err := getCluster(reqCtx, clusterID)
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
 	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
 		writeJSONError(w, err)
 		return
 	}
 
-	certData, err := SetupCertAuth(SetupClientCertAuthOptions{
-		Nodes: cluster.Nodes,
-		Conf:  reqData,
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	certData, err := s.SetupCertAuth(reqCtx, clusterID, service.SetupClientCertAuthOptions{
+		UserName:  reqData.UserName,
+		UserEmail: reqData.UserEmail,
 	})
 	if err != nil {
 		writeJSONError(w, err)
@@ -611,16 +647,7 @@ func HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-type BuildImageJSON struct {
-	ServerVersion       string `json:"server_version"`
-	UseCommunityEdition bool   `json:"community_edition"`
-}
-
-type BuildImageResponseJSON struct {
-	ImageName string `json:"image_name"`
-}
-
-func HttpBuildImage(w http.ResponseWriter, r *http.Request) {
+func (d *daemon) HttpBuildImage(w http.ResponseWriter, r *http.Request) {
 	reqCtx, err := getHttpContext(r)
 	if err != nil {
 		writeJSONError(w, err)
@@ -634,39 +661,160 @@ func HttpBuildImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nodeVersion, err := parseServerVersion(reqData.ServerVersion, reqData.UseCommunityEdition)
-	if err != nil {
-		writeJSONError(w, err)
-		return
-	}
-
-	err = ensureImageExists(reqCtx, nodeVersion, "")
+	image, err := d.dockerService.EnsureImageExists(reqCtx, reqData.ServerVersion, reqData.UseCommunityEdition)
 	if err != nil {
 		writeJSONError(w, err)
 		return
 	}
 
 	imageJSON := BuildImageResponseJSON{
-		ImageName: nodeVersion.toImageName(),
+		ImageName: image,
 	}
 	writeJsonResponse(w, imageJSON)
 }
 
-func createRESTRouter() *mux.Router {
+func (d *daemon) HttpCreateCloudCluster(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	var reqData CreateCloudClusterJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	timeout := 1 * time.Hour
+
+	if reqData.Timeout != "" {
+		clusterTimeout, err := time.ParseDuration(reqData.Timeout)
+		if err != nil {
+			writeJSONError(w, err)
+			return
+		}
+
+		timeout = clusterTimeout
+	}
+
+	if timeout < 0 {
+		writeJSONError(w, errors.New("must specify a valid timeout for the cluster"))
+		return
+	}
+	if timeout > 2*7*24*time.Hour {
+		writeJSONError(w, errors.New("cannot allocate clusters for longer than 2 weeks"))
+		return
+	}
+
+	services := make(map[string]uint32)
+	for _, s := range reqData.Services {
+		sp := strings.Split(s, ",")
+		sort.Strings(sp)
+		key := strings.Join(sp, ",")
+		if _, ok := services[key]; !ok {
+			services[key] = 0
+		}
+
+		services[key]++
+	}
+
+	var nodes []cloud.NodeSetupOptions
+	for k, s := range services {
+		nodes = append(nodes, cloud.NodeSetupOptions{
+			Services: strings.Split(k, ","),
+			Size:     s,
+		})
+	}
+
+	clusterID := helper.NewRandomClusterID()
+	clusterOpts := cloud.ClusterSetupOptions{
+		Nodes:  nodes,
+		Bucket: reqData.Bucket,
+		User:   reqData.User,
+	}
+
+	cloudClusterID, err := d.cloudService.SetupCluster(reqCtx, clusterID, reqData.IP, clusterOpts, helper.RestTimeout)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	dCtx, cancel := context.WithDeadline(reqCtx, time.Now().Add(helper.RestTimeout))
+	defer cancel()
+
+	meta := store.ClusterMeta{
+		Owner:          dyncontext.ContextUser(reqCtx),
+		Timeout:        time.Now().Add(timeout),
+		Platform:       store.ClusterPlatformCloud,
+		CloudClusterID: cloudClusterID,
+	}
+	if err := d.metaStore.CreateClusterMeta(clusterID, meta); err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	c, err := d.cloudService.GetCluster(dCtx, clusterID)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	newClusterJson := jsonifyCluster(c)
+	writeJsonResponse(w, newClusterJson)
+}
+
+func (d *daemon) HttpRegisterCloudCluster(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	var reqData RegisterCloudClusterJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	log.Printf("Registering cloud cluster for %s: %s", reqData.ClusterID, reqData.CloudClusterID)
+
+	meta := store.ClusterMeta{
+		Owner:          dyncontext.ContextUser(reqCtx),
+		Timeout:        time.Now().Add(1 * time.Hour),
+		Platform:       store.ClusterPlatformCloud,
+		CloudClusterID: reqData.CloudClusterID,
+	}
+	if err := d.metaStore.CreateClusterMeta(reqData.ClusterID, meta); err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	w.WriteHeader(200)
+}
+
+func (d *daemon) createRESTRouter() *mux.Router {
 	r := mux.NewRouter()
-	r.HandleFunc("/", HttpRoot)
-	r.HandleFunc("/docker-host", HttpGetDockerHost).Methods("GET")
+	r.HandleFunc("/", d.HttpRoot)
+	r.HandleFunc("/docker-host", d.HttpGetDockerHost).Methods("GET")
 	r.HandleFunc("/version", HttpGetVersion).Methods("GET")
-	r.HandleFunc("/clusters", HttpGetClusters).Methods("GET")
-	r.HandleFunc("/clusters", HttpCreateCluster).Methods("POST")
-	r.HandleFunc("/cluster/{cluster_id}", HttpGetCluster).Methods("GET")
-	r.HandleFunc("/cluster/{cluster_id}", HttpUpdateCluster).Methods("PUT")
-	r.HandleFunc("/cluster/{cluster_id}/setup", HttpSetupCluster).Methods("POST")
-	r.HandleFunc("/cluster/{cluster_id}", HttpDeleteCluster).Methods("DELETE")
-	r.HandleFunc("/cluster/{cluster_id}/add-bucket", HttpAddBucket).Methods("POST")
-	r.HandleFunc("/cluster/{cluster_id}/add-sample-bucket", HttpAddSampleBucket).Methods("POST")
-	r.HandleFunc("/cluster/{cluster_id}/add-collection", HttpAddCollection).Methods("POST")
-	r.HandleFunc("/cluster/{cluster_id}/setup-cert-auth", HttpSetupClientCertAuth).Methods("POST")
-	r.HandleFunc("/images", HttpBuildImage).Methods("POST")
+	r.HandleFunc("/clusters", d.HttpGetClusters).Methods("GET")
+	r.HandleFunc("/clusters", d.HttpCreateCluster).Methods("POST")
+	r.HandleFunc("/create-cloud", d.HttpCreateCloudCluster).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}", d.HttpGetCluster).Methods("GET")
+	r.HandleFunc("/cluster/{cluster_id}", d.HttpUpdateCluster).Methods("PUT")
+	r.HandleFunc("/cluster/{cluster_id}/setup", d.HttpSetupCluster).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}", d.HttpDeleteCluster).Methods("DELETE")
+	r.HandleFunc("/cluster/{cluster_id}/add-bucket", d.HttpAddBucket).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/add-sample-bucket", d.HttpAddSampleBucket).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/add-collection", d.HttpAddCollection).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/setup-cert-auth", d.HttpSetupClientCertAuth).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/add-ip", d.HttpAddIP).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/add-user", d.HttpAddUser).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/connstr", d.HttpConnString).Methods("GET")
+	r.HandleFunc("/images", d.HttpBuildImage).Methods("POST")
+	r.HandleFunc("/register-cloud-cluster", d.HttpRegisterCloudCluster).Methods("POST")
 	return r
 }

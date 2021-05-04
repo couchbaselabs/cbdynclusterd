@@ -1,4 +1,4 @@
-package daemon
+package docker
 
 import (
 	"errors"
@@ -13,15 +13,16 @@ import (
 type Products map[string]map[string]AliasVersion
 
 type AliasVersion struct {
-	Release string `yaml:release,omitempty`
-	Stable  string `yaml:stable,omitempty`
+	Release string `yaml:"release,omitempty"`
+	Stable  string `yaml:"stable,omitempty"`
 }
 
 //Returns the product map from the local products yaml file
-func GetProductsMap() (Products, error){
-	yamlFile, err := ioutil.ReadFile(helper.AliasRepoPath + "/" + helper.AliasFileName)
+func (ds *DockerService) getProductsMap() (Products, error) {
+	yamlFile, err := ioutil.ReadFile(ds.aliasRepoPath + "/" + helper.AliasFileName)
 	if err != nil {
 		log.Printf("Read file err   #%v ", err)
+		return nil, err
 	}
 	return parseYaml(yamlFile)
 }
@@ -36,20 +37,21 @@ func parseYaml(data []byte) (Products, error) {
 }
 
 //Clones/pulls the github alias repo
-func GetConfigRepo() error {
-	_, err := git.PlainClone(helper.AliasRepoPath, false, &git.CloneOptions{
-		URL:               helper.AliasRepo,
-		Progress:          os.Stdout,
+func (ds *DockerService) getConfigRepo() error {
+	log.Printf("Cloning products repo to %s", ds.aliasRepoPath)
+	_, err := git.PlainClone(ds.aliasRepoPath, false, &git.CloneOptions{
+		URL:      helper.AliasRepo,
+		Progress: os.Stdout,
 	})
 
 	if errors.Is(err, git.ErrRepositoryAlreadyExists) {
-		return pullConfigRepo()
+		return ds.pullConfigRepo()
 	}
 	return err
 }
 
-func pullConfigRepo() error {
-	r, err := git.PlainOpen(helper.AliasRepoPath)
+func (ds *DockerService) pullConfigRepo() error {
+	r, err := git.PlainOpen(ds.aliasRepoPath)
 	if err != nil {
 		return err
 	}

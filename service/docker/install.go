@@ -1,4 +1,4 @@
-package cluster
+package docker
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-var (
+const (
 	ReleaseUrl = "http://latestbuilds.service.couchbase.com/builds/releases/"
 	BuildUrl   = "http://latestbuilds.service.couchbase.com/builds/latestbuilds/couchbase-server/"
 )

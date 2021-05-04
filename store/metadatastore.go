@@ -1,38 +1,68 @@
-package daemon
+package store
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
-
 	"github.com/dgraph-io/badger"
 	"github.com/golang/glog"
+	"time"
+)
+
+type ClusterPlatform string
+
+const (
+	ClusterPlatformDocker = "docker"
+	ClusterPlatformCloud  = "cloud"
+)
+
+var (
+	DEFAULT_CLUSTER_TIMEOUT = time.Date(2222, 1, 1, 0, 0, 0, 0, time.UTC)
+	DEFAULT_CLUSTER_META    = ClusterMeta{
+		Owner:    "unknown",
+		Timeout:  DEFAULT_CLUSTER_TIMEOUT,
+		Platform: "unknown",
+	}
 )
 
 type ClusterMetaJSON struct {
-	Owner   string `json:"owner,omitempty"`
-	Timeout string `json:"timeout,omitempty"`
+	Owner          string `json:"owner,omitempty"`
+	Timeout        string `json:"timeout,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	CloudClusterID string `json:"cloudClusterID,omitempty"`
 }
 
 type ClusterMeta struct {
-	Owner   string
-	Timeout time.Time
+	Owner          string
+	Timeout        time.Time
+	Platform       ClusterPlatform
+	CloudClusterID string
 }
 
 type MetaDataStore struct {
 	db *badger.DB
 }
 
-var DEFAULT_CLUSTER_META ClusterMeta = ClusterMeta{
-	Owner:   "unknown",
-	Timeout: DEFAULT_CLUSTER_TIMEOUT,
+type ReadOnlyMetaDataStore struct {
+	store *MetaDataStore
+}
+
+func NewReadOnlyMetaDataStore(store *MetaDataStore) *ReadOnlyMetaDataStore {
+	return &ReadOnlyMetaDataStore{
+		store: store,
+	}
+}
+
+func (store *ReadOnlyMetaDataStore) GetClusterMeta(clusterID string) (ClusterMeta, error) {
+	return store.store.GetClusterMeta(clusterID)
 }
 
 func (store *MetaDataStore) serializeMeta(meta ClusterMeta) ([]byte, error) {
 	metaJSON := ClusterMetaJSON{
-		Owner:   meta.Owner,
-		Timeout: meta.Timeout.Format(time.RFC3339),
+		Owner:          meta.Owner,
+		Timeout:        meta.Timeout.Format(time.RFC3339),
+		Platform:       string(meta.Platform),
+		CloudClusterID: meta.CloudClusterID,
 	}
 
 	metaBytes, err := json.Marshal(metaJSON)
@@ -56,8 +86,10 @@ func (store *MetaDataStore) deserializeMeta(bytes []byte) (ClusterMeta, error) {
 	}
 
 	return ClusterMeta{
-		Owner:   metaJSON.Owner,
-		Timeout: parsedTimeout,
+		Owner:          metaJSON.Owner,
+		Timeout:        parsedTimeout,
+		Platform:       ClusterPlatform(metaJSON.Platform),
+		CloudClusterID: metaJSON.CloudClusterID,
 	}, nil
 }
 
