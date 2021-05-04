@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"log"
@@ -75,6 +77,53 @@ func jsonifyNode(node *cluster.Node) NodeJSON {
 		IPv4Address:          node.IPv4Address,
 		IPv6Address:          node.IPv6Address,
 	}
+}
+
+func UnjsonifyNode(jsonNode *NodeJSON) *cluster.Node {
+	return &cluster.Node{
+		ContainerID:          jsonNode.ID,
+		ContainerName:        jsonNode.ContainerName,
+		State:                jsonNode.State,
+		Name:                 jsonNode.Name,
+		InitialServerVersion: jsonNode.InitialServerVersion,
+		IPv4Address:          jsonNode.IPv4Address,
+		IPv6Address:          jsonNode.IPv6Address,
+	}
+}
+
+func UnjsonifyDockerHost(dockerHost *DockerHostJSON) (string, error) {
+	if dockerHost == nil || dockerHost.Hostname == "" || dockerHost.Port == "" {
+		return "", errors.New("Docker hostname or port is empty")
+	}
+	return fmt.Sprintf("%s:%s", dockerHost.Hostname, dockerHost.Port), nil
+}
+
+func UnjsonifyVersion(version *VersionJSON) (string, error) {
+	if version == nil || version.Version == "" {
+		return "", errors.New("cbdynclusterd version is empty")
+	}
+	return version.Version, nil
+}
+
+func UnjsonifyCluster(jsonCluster *ClusterJSON) (*cluster.Cluster, error) {
+	cluster := &cluster.Cluster{}
+	cluster.ID = jsonCluster.ID
+	cluster.Creator = jsonCluster.Creator
+	cluster.Owner = jsonCluster.Owner
+	cluster.EntryPoint = jsonCluster.EntryPoint
+
+	clusterTimeout, err := time.Parse(time.RFC3339, jsonCluster.Timeout)
+	if err != nil {
+		return nil, err
+	}
+	cluster.Timeout = clusterTimeout
+
+	for _, jsonNode := range jsonCluster.Nodes {
+		node := UnjsonifyNode(&jsonNode)
+		cluster.Nodes = append(cluster.Nodes, node)
+	}
+
+	return cluster, nil
 }
 
 type ErrorJSON struct {
@@ -187,4 +236,34 @@ type BuildImageJSON struct {
 
 type BuildImageResponseJSON struct {
 	ImageName string `json:"image_name"`
+}
+
+type CreateCloudClusterJSON struct {
+	Timeout  string             `json:"timeout"`
+	Services []string           `json:"services"`
+	User     *helper.UserOption `json:"user"`
+	IP       string             `json:"ip"`
+	Bucket   string             `json:"bucket"`
+}
+
+type AddIPJSON struct {
+	IP string `json:"ip"`
+}
+
+type AddUserJSON struct {
+	User   *helper.UserOption `json:"user"`
+	Bucket string             `json:"bucket"`
+}
+
+type ConnStringJSON struct {
+	UseSSL bool `json:"useSSL"`
+}
+
+type ConnStringResponseJSON struct {
+	ConnStr string `json:"connStr"`
+}
+
+type RegisterCloudClusterJSON struct {
+	ClusterID      string `json:"cluster_id"`
+	CloudClusterID string `json:"cloud_id"`
 }

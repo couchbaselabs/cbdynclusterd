@@ -1,10 +1,5 @@
 package service
 
-import (
-	"github.com/couchbaselabs/cbdynclusterd/cluster"
-	"github.com/couchbaselabs/cbdynclusterd/helper"
-)
-
 type AddCollectionOptions struct {
 	Name        string
 	ScopeName   string
@@ -12,20 +7,7 @@ type AddCollectionOptions struct {
 	UseHostname bool
 }
 
-type ClusterSetupOptions struct {
-	Services            []string
-	Nodes               []*cluster.Node
-	UseHostname         bool
-	UseIpv6             bool
-	MemoryQuota         string
-	User                *helper.UserOption
-	StorageMode         string
-	Bucket              *helper.BucketOption
-	UseDeveloperPreview bool
-}
-
 type SetupClientCertAuthOptions struct {
-	Nodes     []*cluster.Node
 	UserName  string
 	UserEmail string
 }

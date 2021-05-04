@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
+	"github.com/couchbaselabs/cbdynclusterd/helper"
 )
 
 type CertAuthResult struct {
@@ -16,9 +17,11 @@ type ClusterService interface {
 	GetAllClusters(ctx context.Context) ([]*cluster.Cluster, error)
 	KillCluster(ctx context.Context, clusterID string) error
 	KillAllClusters(ctx context.Context) error
-	SetupCluster(opts *ClusterSetupOptions) (string, error)
 	AddCollection(ctx context.Context, clusterID string, opts AddCollectionOptions) error
-	SetupCertAuth(opts SetupClientCertAuthOptions) (*CertAuthResult, error)
+	SetupCertAuth(ctx context.Context, clusterID string, opts SetupClientCertAuthOptions) (*CertAuthResult, error)
 	AddBucket(ctx context.Context, clusterID string, opts AddBucketOptions) error
 	AddSampleBucket(ctx context.Context, clusterID string, opts AddSampleOptions) error
+	AddIP(ctx context.Context, clusterID, ip string) error
+	AddUser(ctx context.Context, clusterID string, user *helper.UserOption, bucket string) error
+	ConnString(ctx context.Context, clusterID string, useSSL bool) (string, error)
 }

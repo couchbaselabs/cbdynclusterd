@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
+	"github.com/couchbaselabs/cbdynclusterd/service"
 	"github.com/couchbaselabs/cbdynclusterd/store"
 	"log"
 	"time"
@@ -11,21 +12,34 @@ import (
 func (d *daemon) refreshCluster(ctx context.Context, clusterID string, newTimeout time.Duration) error {
 	log.Printf("Refreshing cluster %s (requested by: %s)", clusterID, dyncontext.ContextUser(ctx))
 
-	// Check the cluster actuall exists
-	_, err := d.dockerService.GetCluster(ctx, clusterID)
-	if err != nil {
-		return err
-	}
-
 	newMeta := store.ClusterMeta{
 		Owner:   dyncontext.ContextUser(ctx),
 		Timeout: time.Now().Add(newTimeout),
 	}
 
-	_, err = d.metaStore.GetClusterMeta(clusterID)
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
 	if err != nil {
-		// If we failed to fetch the cluster metadata, just insert some instead
-		return d.metaStore.CreateClusterMeta(clusterID, newMeta)
+		// We don't seem to know anything about this so let's bail out.
+		return err
+	}
+
+	newMeta.Platform = meta.Platform
+
+	var s service.ClusterService
+	if newMeta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if newMeta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+		newMeta.Platform = store.ClusterPlatformDocker
+	}
+
+	// Check the cluster actually exists
+	_, err = s.GetCluster(ctx, clusterID)
+	if err != nil {
+		return err
 	}
 
 	return d.metaStore.UpdateClusterMeta(clusterID, func(meta store.ClusterMeta) (store.ClusterMeta, error) {
