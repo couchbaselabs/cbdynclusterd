@@ -18,13 +18,17 @@ GOARCH  ?= amd64
 
 .DEFAULT: default
 .PHONY: default
-default: clean build
+default: clean submodule build
 
 .PHONY: all
-all: clean build-all
+all: clean submodule build-all
 
 .PHONY: release
-release: clean build-all
+release: clean submodule build-all
+
+.PHONY: submodule
+submodule:
+	git submodule update --init --recursive
 
 #-------------------------------------------------------------------------------
 # EXECUTABLE
