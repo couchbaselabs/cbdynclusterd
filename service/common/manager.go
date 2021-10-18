@@ -1,4 +1,4 @@
-package docker
+package common
 
 import (
 	"bufio"
@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"io"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/couchbaselabs/cbdynclusterd/cluster"
 
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/golang/glog"
@@ -377,7 +378,12 @@ func clearSingleCluster(nodes []*Node) error {
 
 	epnode, err := getEpNode(true, nodes)
 
+	if err != nil {
+		return err
+	}
+
 	buckets, err := epnode.GetBuckets()
+
 	if err != nil {
 		return err
 	}

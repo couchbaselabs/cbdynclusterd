@@ -2,15 +2,14 @@ package docker
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"strconv"
-	"strings"
 
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/couchbaselabs/cbdynclusterd/service"
+	"github.com/couchbaselabs/cbdynclusterd/service/common"
 	"github.com/couchbaselabs/cbdynclusterd/store"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/network"
@@ -129,7 +128,7 @@ func (ds *DockerService) GetAllClusters(ctx context.Context) ([]*cluster.Cluster
 	return clusters, nil
 }
 
-func (ds *DockerService) AllocateCluster(ctx context.Context, opts AllocateClusterOptions) (string, error) {
+func (ds *DockerService) AllocateCluster(ctx context.Context, opts service.AllocateClusterOptions) (string, error) {
 	log.Printf("Allocating cluster (requested by: %s)", dyncontext.ContextUser(ctx))
 
 	if len(opts.Nodes) == 0 {
@@ -139,35 +138,17 @@ func (ds *DockerService) AllocateCluster(ctx context.Context, opts AllocateClust
 		return "", errors.New("cannot allocate clusters with more than 10 nodes")
 	}
 
-	if err := ds.getConfigRepo(); err != nil {
+	if err := common.GetConfigRepo(ds.aliasRepoPath); err != nil {
 		log.Printf("Get config failed: %v", err)
 		return "", err
 	}
 
 	clusterID := helper.NewRandomClusterID()
 
-	var nodesToAllocate []nodeOptions
-	for nodeIdx, node := range opts.Nodes {
-		finalVersion, err := ds.aliasServerVersion(node.ServerVersion)
-		if err != nil {
-			return "", err
-		}
-		nodeVersion, err := parseServerVersion(finalVersion, node.UseCommunityEdition)
-		if err != nil {
-			return "", err
-		}
+	nodesToAllocate, err := common.CreateNodesToAllocate(opts.Nodes, ds.aliasRepoPath)
 
-		nodeToAllocate := nodeOptions{
-			Name:          node.Name,
-			Platform:      node.Platform,
-			ServerVersion: finalVersion,
-			VersionInfo:   nodeVersion,
-		}
-		if nodeToAllocate.Name == "" {
-			nodeToAllocate.Name = fmt.Sprintf("node_%d", nodeIdx+1)
-		}
-
-		nodesToAllocate = append(nodesToAllocate, nodeToAllocate)
+	if err != nil {
+		return "", err
 	}
 
 	if len(nodesToAllocate) > 0 {
@@ -183,7 +164,7 @@ func (ds *DockerService) AllocateCluster(ctx context.Context, opts AllocateClust
 	signal := make(chan error)
 
 	for _, node := range nodesToAllocate {
-		go func(clusterID string, node nodeOptions) {
+		go func(clusterID string, node common.NodeOptions) {
 			_, err := ds.allocateNode(ctx, clusterID, opts.Deadline, node)
 			signal <- err
 		}(clusterID, node)
@@ -245,42 +226,11 @@ func (ds *DockerService) KillCluster(ctx context.Context, clusterID string) erro
 
 func (ds *DockerService) KillAllClusters(ctx context.Context) error {
 	log.Printf("Killing all docker clusters")
-
-	var clustersToKill []string
-
-	clusters, err := ds.GetAllClusters(ctx)
-	if err != nil {
-		return err
-	}
-
-	for _, c := range clusters {
-		clustersToKill = append(clustersToKill, c.ID)
-	}
-
-	signal := make(chan error)
-
-	for _, clusterID := range clustersToKill {
-		go func(clusterID string) {
-			signal <- ds.KillCluster(ctx, clusterID)
-		}(clusterID)
-	}
-
-	var killError error
-	for range clustersToKill {
-		err := <-signal
-		if err != nil && killError == nil {
-			killError = err
-		}
-	}
-	if killError != nil {
-		return killError
-	}
-
-	return nil
+	return common.KillAllClusters(ctx, ds)
 }
 
-func (ds *DockerService) EnsureImageExists(ctx context.Context, serverVersion string, useCommunity bool) (string, error) {
-	nodeVersion, err := parseServerVersion(serverVersion, useCommunity)
+func (ds *DockerService) EnsureImageExists(ctx context.Context, serverVersion, os, arch string, useCommunity bool) (string, error) {
+	nodeVersion, err := common.ParseServerVersion(serverVersion, os, arch, useCommunity)
 	if err != nil {
 		return "", err
 	}
@@ -290,84 +240,11 @@ func (ds *DockerService) EnsureImageExists(ctx context.Context, serverVersion st
 		return "", err
 	}
 
-	return nodeVersion.toImageName(ds.dockerRegistry), nil
-}
-
-func (ds *DockerService) SetupCluster(opts ClusterSetupOptions) (string, error) {
-	services := opts.Services
-
-	initialNodes := opts.Nodes
-	var nodes []*Node
-	for i := 0; i < len(services); i++ {
-		ipv4 := initialNodes[i].IPv4Address
-		hostname := ipv4
-		if opts.UseHostname {
-			hostname = initialNodes[i].ContainerName[1:] + helper.DomainPostfix
-		} else if opts.UseIpv6 {
-			hostname = initialNodes[i].IPv6Address
-		}
-
-		nodeHost := &Node{
-			HostName:  hostname,
-			Port:      strconv.Itoa(helper.RestPort),
-			SshLogin:  &helper.Cred{Username: helper.SshUser, Password: helper.SshPass, Hostname: ipv4, Port: helper.SshPort},
-			RestLogin: &helper.Cred{Username: helper.RestUser, Password: helper.RestPass, Hostname: ipv4, Port: helper.RestPort},
-			N1qlLogin: &helper.Cred{Username: helper.RestUser, Password: helper.RestPass, Hostname: ipv4, Port: helper.N1qlPort},
-			FtsLogin:  &helper.Cred{Username: helper.RestUser, Password: helper.RestPass, Hostname: ipv4, Port: helper.FtsPort},
-			Services:  services[i],
-		}
-		nodes = append(nodes, nodeHost)
-	}
-
-	config := Config{
-		MemoryQuota:   opts.MemoryQuota,
-		StorageMode:   opts.StorageMode,
-		User:          opts.User,
-		Bucket:        opts.Bucket,
-		UseHostname:   opts.UseHostname,
-		UseDevPreview: opts.UseDeveloperPreview,
-	}
-
-	clusterManager := &Manager{
-		Nodes:  nodes,
-		Config: config,
-	}
-
-	return clusterManager.StartCluster()
+	return nodeVersion.ToImageName(ds.dockerRegistry), nil
 }
 
 func (ds *DockerService) AddCollection(ctx context.Context, clusterID string, opts service.AddCollectionOptions) error {
-	log.Printf("Adding collection %s to bucket %s on cluster %s (requested by: %s)", opts.Name,
-		opts.BucketName, clusterID, dyncontext.ContextUser(ctx))
-
-	c, err := ds.GetCluster(ctx, clusterID)
-	if err != nil {
-		return err
-	}
-
-	if len(c.Nodes) == 0 {
-		return errors.New("no nodes available")
-	}
-
-	n := c.Nodes[0]
-	ipv4 := n.IPv4Address
-	hostname := ipv4
-	if opts.UseHostname {
-		hostname = n.ContainerName[1:] + helper.DomainPostfix
-	}
-
-	node := &Node{
-		HostName:  hostname,
-		Port:      strconv.Itoa(helper.RestPort),
-		SshLogin:  &helper.Cred{Username: helper.SshUser, Password: helper.SshPass, Hostname: ipv4, Port: helper.SshPort},
-		RestLogin: &helper.Cred{Username: helper.RestUser, Password: helper.RestPass, Hostname: ipv4, Port: helper.RestPort},
-	}
-
-	return node.CreateCollection(&cluster.Collection{
-		Name:       opts.Name,
-		ScopeName:  opts.ScopeName,
-		BucketName: opts.BucketName,
-	})
+	return common.AddCollection(ctx, ds, clusterID, opts)
 }
 
 func (ds *DockerService) SetupCertAuth(ctx context.Context, clusterID string, opts service.SetupClientCertAuthOptions) (*service.CertAuthResult, error) {
@@ -396,73 +273,11 @@ func (ds *DockerService) SetupCertAuth(ctx context.Context, clusterID string, op
 }
 
 func (ds *DockerService) AddBucket(ctx context.Context, clusterID string, opts service.AddBucketOptions) error {
-	log.Printf("Adding bucket %s to cluster %s (requested by: %s)", opts.Name, clusterID, dyncontext.ContextUser(ctx))
-
-	c, err := ds.GetCluster(ctx, clusterID)
-	if err != nil {
-		return err
-	}
-
-	if len(c.Nodes) == 0 {
-		return errors.New("no nodes available")
-	}
-
-	n := c.Nodes[0]
-	ipv4 := n.IPv4Address
-	hostname := ipv4
-	if opts.UseHostname {
-		hostname = n.ContainerName[1:] + helper.DomainPostfix
-	}
-
-	node := &Node{
-		HostName:  hostname,
-		Port:      strconv.Itoa(helper.RestPort),
-		SshLogin:  &helper.Cred{Username: helper.SshUser, Password: helper.SshPass, Hostname: ipv4, Port: helper.SshPort},
-		RestLogin: &helper.Cred{Username: helper.RestUser, Password: helper.RestPass, Hostname: ipv4, Port: helper.RestPort},
-		Version:   n.InitialServerVersion,
-	}
-
-	return node.CreateBucket(&cluster.Bucket{
-		Name:              opts.Name,
-		Type:              opts.BucketType,
-		ReplicaCount:      opts.ReplicaCount,
-		RamQuotaMB:        strconv.Itoa(opts.RamQuota),
-		EphEvictionPolicy: opts.EvictionPolicy,
-		StorageBackend:    opts.StorageBackend,
-	})
+	return common.AddBucket(ctx, ds, clusterID, opts)
 }
 
 func (ds *DockerService) AddSampleBucket(ctx context.Context, clusterID string, opts service.AddSampleOptions) error {
-	log.Printf("Loading sample bucket %s to cluster %s (requested by: %s)", opts.SampleBucket, clusterID, dyncontext.ContextUser(ctx))
-
-	if helper.SampleBucketsCount[opts.SampleBucket] == 0 {
-		return errors.New("Unknown sample bucket")
-	}
-
-	c, err := ds.GetCluster(ctx, clusterID)
-	if err != nil {
-		return err
-	}
-
-	if len(c.Nodes) == 0 {
-		return errors.New("no nodes available")
-	}
-
-	n := c.Nodes[0]
-	ipv4 := n.IPv4Address
-	hostname := ipv4
-	if opts.UseHostname {
-		hostname = n.ContainerName[1:] + helper.DomainPostfix
-	}
-
-	node := &Node{
-		HostName:  hostname,
-		Port:      strconv.Itoa(helper.RestPort),
-		SshLogin:  &helper.Cred{Username: helper.SshUser, Password: helper.SshPass, Hostname: ipv4, Port: helper.SshPort},
-		RestLogin: &helper.Cred{Username: helper.RestUser, Password: helper.RestPass, Hostname: ipv4, Port: helper.RestPort},
-	}
-
-	return node.LoadSample(opts.SampleBucket)
+	return common.AddSampleBucket(ctx, ds, clusterID, opts)
 }
 
 func (ds *DockerService) AddUser(ctx context.Context, clusterID string, user *helper.UserOption, bucket string) error {
@@ -474,20 +289,5 @@ func (ds *DockerService) AddIP(ctx context.Context, clusterID, ip string) error 
 }
 
 func (ds *DockerService) ConnString(ctx context.Context, clusterID string, useSSL bool) (string, error) {
-	c, err := ds.GetCluster(ctx, clusterID)
-	if err != nil {
-		return "", err
-	}
-
-	var addresses []string
-	for _, node := range c.Nodes {
-		addresses = append(addresses, node.IPv4Address)
-	}
-
-	scheme := "couchbase"
-	if useSSL {
-		scheme = "couchbases"
-	}
-
-	return fmt.Sprintf("%s://%s", scheme, strings.Join(addresses, ",")), nil
+	return common.ConnString(ctx, ds, clusterID, useSSL)
 }

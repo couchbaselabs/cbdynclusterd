@@ -170,6 +170,8 @@ type CreateClusterNodeJSON struct {
 	Platform            string `json:"platform"`
 	ServerVersion       string `json:"server_version"`
 	UseCommunityEdition bool   `json:"community_edition"`
+	OS                  string `json:"os"`
+	Arch                string `json:"arch"`
 }
 
 type CreateClusterSetupJSON struct {
@@ -235,6 +237,8 @@ type CertAuthResultJSON struct {
 type BuildImageJSON struct {
 	ServerVersion       string `json:"server_version"`
 	UseCommunityEdition bool   `json:"community_edition"`
+	OS                  string `json:"os"`
+	Arch                string `json:"arch"`
 }
 
 type BuildImageResponseJSON struct {

@@ -1,4 +1,4 @@
-package docker
+package common
 
 import (
 	"bytes"
@@ -982,12 +982,16 @@ func (n *Node) GetSystemInfo() OsInfo {
 }
 
 func (n *Node) RunSsh(stdoutBuf *bytes.Buffer, stderrBuf *bytes.Buffer, cmd string) error {
-	n.session = newSession(n.SshLogin)
+	session, err := newSession(n.SshLogin)
+	if err != nil {
+		return err
+	}
+	n.session = session
 	n.session.Stdout = stdoutBuf
 	n.session.Stderr = stderrBuf
 
 	defer n.session.Close()
-	err := n.session.Run(cmd)
+	err = n.session.Run(cmd)
 	if err != nil {
 		if stderrBuf.Len() > 0 {
 			return errors.New((*stderrBuf).String())
@@ -1012,7 +1016,10 @@ func (n *Node) ScpToRemote(src, dest string) error {
 		return err
 	}
 
-	n.session = newSession(n.SshLogin)
+	n.session, err = newSession(n.SshLogin)
+	if err != nil {
+		return err
+	}
 	defer n.session.Close()
 
 	n.session.Stderr = &stderrBuf
@@ -1078,19 +1085,19 @@ func newClient(sshLogin *helper.Cred) (*ssh.Client, error) {
 
 }
 
-func newSession(sshLogin *helper.Cred) *ssh.Session {
+func newSession(sshLogin *helper.Cred) (*ssh.Session, error) {
 	connection, err := newClient(sshLogin)
 
 	if err != nil {
-		glog.Fatalf("Failed to dial:%s", err)
+		return nil, errors.New(fmt.Sprintf("Failed to dial:%s", err))
 	}
 
 	session, err := connection.NewSession()
 	if err != nil {
-		glog.Fatalf(":%s", err)
+		return nil, err
 	}
 
-	return session
+	return session, nil
 }
 
 func (n *Node) SetupCert(cas []*x509.Certificate, caPrivateKeys []*rsa.PrivateKey, now time.Time, clusterVersion string, rootIndex int) error {

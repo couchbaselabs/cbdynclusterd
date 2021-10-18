@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"time"
+
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 )
@@ -12,6 +14,19 @@ type CertAuthResult struct {
 	ClientCert []byte
 }
 
+type AllocateClusterOptions struct {
+	Deadline time.Time
+	Nodes    []CreateNodeOptions
+}
+
+type CreateNodeOptions struct {
+	Name                string
+	Platform            string
+	ServerVersion       string
+	UseCommunityEdition bool
+	OS                  string
+	Arch                string
+}
 type ClusterService interface {
 	GetCluster(ctx context.Context, clusterID string) (*cluster.Cluster, error)
 	GetAllClusters(ctx context.Context) ([]*cluster.Cluster, error)
@@ -24,4 +39,8 @@ type ClusterService interface {
 	AddIP(ctx context.Context, clusterID, ip string) error
 	AddUser(ctx context.Context, clusterID string, user *helper.UserOption, bucket string) error
 	ConnString(ctx context.Context, clusterID string, useSSL bool) (string, error)
+}
+
+type UnmanagedClusterService interface {
+	AllocateCluster(ctx context.Context, opts AllocateClusterOptions) (string, error)
 }

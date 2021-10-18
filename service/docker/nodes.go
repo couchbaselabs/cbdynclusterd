@@ -2,13 +2,12 @@ package docker
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
 	"log"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
+	"github.com/couchbaselabs/cbdynclusterd/service/common"
 
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/docker/docker/api/types"
@@ -18,151 +17,11 @@ import (
 
 var NetworkName = "macvlan0"
 
-type Edition string
-
-const (
-	Enterprise Edition = "enterprise"
-	Community  Edition = "community"
-)
-
-type CreateNodeOptions struct {
-	Name                string
-	Platform            string
-	ServerVersion       string
-	UseCommunityEdition bool
-}
-
-type nodeOptions struct {
-	Name          string
-	Platform      string
-	ServerVersion string
-	VersionInfo   *NodeVersion
-}
-
-type NodeVersion struct {
-	Version string
-	Flavor  string
-	Build   string
-	Edition Edition
-}
-
-func (nv *NodeVersion) toTagName() string {
-	if nv.Build == "" {
-		return fmt.Sprintf("%s.centos7", nv.Version)
-	}
-	return fmt.Sprintf("%s-%s.centos7", nv.Version, nv.Build)
-}
-
-func (nv *NodeVersion) toImageName(dockerRegistry string) string {
-	return fmt.Sprintf("%s/dynclsr-couchbase_%s_%s", dockerRegistry, nv.Edition, nv.toTagName())
-}
-
-func (nv *NodeVersion) toPkgName() string {
-	if nv.Build == "" {
-		return fmt.Sprintf("couchbase-server-%s-%s-centos7.x86_64.rpm", nv.Edition, nv.Version)
-	}
-	return fmt.Sprintf("couchbase-server-%s-%s-%s-centos7.x86_64.rpm", nv.Edition, nv.Version, nv.Build)
-}
-
-func (nv *NodeVersion) toURL() string {
-	// If there's no build number specified then the target is a release
-	if nv.Build == "" {
-		return fmt.Sprintf("%s%s", ReleaseUrl, nv.Version)
-	}
-	return fmt.Sprintf("%s%s/%s", BuildUrl, nv.Flavor, nv.Build)
-}
-
-var versionToFlavor = map[int]map[int]string{
-	4: {0: "sherlock", 5: "watson"},
-	5: {0: "spock", 5: "vulcan"},
-	6: {0: "alice", 5: "mad-hatter"},
-	7: {0: "cheshire-cat", 1: "neo"},
-}
-
-func flavorFromVersion(version string) (string, error) {
-	versionSplit := strings.Split(version, ".")
-
-	major, err := strconv.Atoi(versionSplit[0])
-	if err != nil {
-		return "", errors.New("Could not convert version major to int")
-	}
-
-	minor, err := strconv.Atoi(versionSplit[1])
-	if err != nil {
-		return "", errors.New("Could not convert version minor to int")
-	}
-
-	if minor >= 5 {
-		minor = 5
-	}
-
-	flavor, ok := versionToFlavor[major][minor]
-	if !ok {
-		return "", fmt.Errorf("%d.%d is not a recognised flavor", major, minor)
-	}
-
-	return flavor, nil
-}
-
-func parseServerVersion(version string, useCE bool) (*NodeVersion, error) {
-	nodeVersion := NodeVersion{}
-	versionParts := strings.Split(version, "-")
-	flavor, err := flavorFromVersion(versionParts[0])
-	if err != nil {
-		return nil, err
-	}
-	nodeVersion.Version = versionParts[0]
-	nodeVersion.Flavor = flavor
-	if len(versionParts) > 1 {
-		nodeVersion.Build = versionParts[1]
-	}
-	if useCE {
-		nodeVersion.Edition = Community
-	} else {
-		nodeVersion.Edition = Enterprise
-	}
-
-	return &nodeVersion, nil
-}
-
-func (ds *DockerService) aliasServerVersion(version string) (string, error) {
-	//Check for aliasing format: M.m-stable/release
-	buildParts := strings.Split(version, "-")
-	if len(buildParts) < 2 {
-		return version, nil
-	}
-
-	versionParts := strings.Split(buildParts[0], ".")
-	if len(versionParts) > 2 {
-		return version, nil
-	}
-
-	p, err := ds.getProductsMap()
-	if err != nil {
-		return "", err
-	}
-
-	var serverBuild string
-	if buildParts[1] == "release" {
-		serverBuild = p["couchbase-server"][buildParts[0]].Release
-	} else if buildParts[1] == "stable" {
-		//Stable version should always have a result
-		serverBuild = p["couchbase-server"][buildParts[0]].Stable
-	}
-
-	if serverBuild == "" {
-		return "", fmt.Errorf("No build version found for %s", version)
-	}
-
-	log.Printf("Using %s version for %s -> %s", buildParts[1], buildParts[0], serverBuild)
-	return serverBuild, nil
-}
-
-func (ds *DockerService) allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts nodeOptions) (string, error) {
+func (ds *DockerService) allocateNode(ctx context.Context, clusterID string, timeout time.Time, opts common.NodeOptions) (string, error) {
 	log.Printf("Allocating node for cluster %s (requested by: %s)", clusterID, dyncontext.ContextUser(ctx))
 
 	containerName := fmt.Sprintf("dynclsr-%s-%s", clusterID, opts.Name)
-	containerImage := opts.VersionInfo.toImageName(ds.dockerRegistry)
+	containerImage := opts.VersionInfo.ToImageName(ds.dockerRegistry)
 
 	var dns []string
 	if ds.dnsSvcHost != "" {

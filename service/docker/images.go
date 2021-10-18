@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
-	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"io"
 	"log"
-	"net/http"
 	"os"
+
+	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
+	"github.com/couchbaselabs/cbdynclusterd/helper"
+	"github.com/couchbaselabs/cbdynclusterd/service/common"
 
 	"github.com/docker/docker/api/types"
 	"github.com/jhoonb/archivex"
@@ -31,8 +32,8 @@ type imageBuildArgs struct {
 	BuildNo string
 }
 
-func (ds *DockerService) imagePush(ctx context.Context, nodeVersion *NodeVersion) error {
-	eventReader, err := ds.docker.ImagePush(ctx, nodeVersion.toImageName(ds.dockerRegistry), types.ImagePushOptions{
+func (ds *DockerService) imagePush(ctx context.Context, nodeVersion *common.NodeVersion) error {
+	eventReader, err := ds.docker.ImagePush(ctx, nodeVersion.ToImageName(ds.dockerRegistry), types.ImagePushOptions{
 		RegistryAuth: ds.dockerRegistry,
 	})
 	if err != nil {
@@ -48,7 +49,7 @@ func (ds *DockerService) imagePush(ctx context.Context, nodeVersion *NodeVersion
 	return nil
 }
 
-func (ds *DockerService) imageBuild(ctx context.Context, nodeVersion *NodeVersion, dockerfilePath string) error {
+func (ds *DockerService) imageBuild(ctx context.Context, nodeVersion *common.NodeVersion, dockerfilePath string) error {
 	tar := new(archivex.TarFile)
 	tarPath := fmt.Sprintf("/tmp/%s-%s.tar", nodeVersion.Version, nodeVersion.Build)
 	err := tar.Create(tarPath)
@@ -64,8 +65,8 @@ func (ds *DockerService) imageBuild(ctx context.Context, nodeVersion *NodeVersio
 		return errors.Wrap(err, "could not close tar file")
 	}
 
-	pkg := nodeVersion.toPkgName()
-	url := nodeVersion.toURL()
+	pkg := nodeVersion.ToPkgName()
+	url := nodeVersion.ToURL()
 	buildArgs := make(map[string]*string)
 	buildArgs["VERSION"] = &nodeVersion.Version
 	buildArgs["BUILD_NO"] = &nodeVersion.Build
@@ -78,7 +79,7 @@ func (ds *DockerService) imageBuild(ctx context.Context, nodeVersion *NodeVersio
 
 	resp, err := ds.docker.ImageBuild(ctx, buildCtx, types.ImageBuildOptions{
 		PullParent:     true,
-		Tags:           []string{nodeVersion.toImageName(ds.dockerRegistry)},
+		Tags:           []string{nodeVersion.ToImageName(ds.dockerRegistry)},
 		BuildArgs:      buildArgs,
 		SuppressOutput: false,
 	})
@@ -112,11 +113,11 @@ func (ds *DockerService) imagePull(ctx context.Context, imageRef string) error {
 	return nil
 }
 
-func (ds *DockerService) ensureImageExists(ctx context.Context, versionInfo *NodeVersion, clusterID string) error {
-	containerImage := versionInfo.toImageName(ds.dockerRegistry)
+func (ds *DockerService) ensureImageExists(ctx context.Context, versionInfo *common.NodeVersion, clusterID string) error {
+	containerImage := versionInfo.ToImageName(ds.dockerRegistry)
 	user := dyncontext.ContextUser(ctx)
 	if ds.dockerRegistry == "" {
-		err := checkBuildExists(fmt.Sprintf("%s/%s", versionInfo.toURL(), versionInfo.toPkgName()))
+		err := common.CheckBuildExists(versionInfo)
 		if err != nil {
 			return err
 		}
@@ -127,7 +128,7 @@ func (ds *DockerService) ensureImageExists(ctx context.Context, versionInfo *Nod
 		} else {
 			log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, user)
 		}
-		err = ds.imageBuild(ctx, versionInfo, helper.DockerFilePath+"couchbase/centos7") // TODO: might want this to be a config too
+		err = ds.imageBuild(ctx, versionInfo, helper.DockerFilePath+"couchbase/"+versionInfo.OS)
 		if err != nil {
 			return err
 		}
@@ -140,13 +141,13 @@ func (ds *DockerService) ensureImageExists(ctx context.Context, versionInfo *Nod
 	if err != nil {
 		// assume that pull failed because the image didn't exist on the registry
 		// check the build exists and then build the image
-		err = checkBuildExists(fmt.Sprintf("%s/%s", versionInfo.toURL(), versionInfo.toPkgName()))
+		err = common.CheckBuildExists(versionInfo)
 		if err != nil {
 			return err
 		}
 
 		log.Printf("Building %s image for cluster %s (requested by: %s)", containerImage, clusterID, user)
-		err = ds.imageBuild(ctx, versionInfo, helper.DockerFilePath+"couchbase/centos7") // TODO: might want this to be a config too
+		err = ds.imageBuild(ctx, versionInfo, helper.DockerFilePath+"couchbase/"+versionInfo.OS)
 		if err != nil {
 			return err
 		}
@@ -157,18 +158,6 @@ func (ds *DockerService) ensureImageExists(ctx context.Context, versionInfo *Nod
 			return err
 		}
 	}
-	return nil
-}
-
-func checkBuildExists(url string) error {
-	resp, err := http.Head(url)
-	if err != nil {
-		return errors.Wrap(err, "Could not locate build")
-	}
-	if resp.StatusCode != 200 {
-		return errors.New("Could not locate build")
-	}
-
 	return nil
 }
 

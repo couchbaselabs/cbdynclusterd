@@ -105,7 +105,7 @@ func (d *daemon) HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, errors.New("cannot allocate clusters for longer than 2 weeks"))
 		return
 	}
-	clusterOpts := docker.AllocateClusterOptions{
+	clusterOpts := service.AllocateClusterOptions{
 		Deadline: time.Now().Add(timeout),
 	}
 
@@ -234,7 +234,7 @@ func (d *daemon) HttpSetupCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	epnode, err := d.dockerService.SetupCluster(docker.ClusterSetupOptions{
+	epnode, err := common.SetupCluster(common.ClusterSetupOptions{
 		Nodes:               c.Nodes,
 		Services:            reqData.Services,
 		UseHostname:         reqData.UseHostname,
