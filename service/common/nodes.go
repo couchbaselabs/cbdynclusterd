@@ -83,6 +83,14 @@ func (nv *NodeVersion) ToURL() string {
 	return fmt.Sprintf("%s%s/%s", BuildUrl, nv.Flavor, nv.Build)
 }
 
+func (nv *NodeVersion) ToExternalURL() string {
+	// If there's no build number specified then the target is a release
+	if nv.Build == "" {
+		return fmt.Sprintf("%s%s", ExternalReleaseUrl, nv.Version)
+	}
+	return fmt.Sprintf("%s%s/%s", ExternalBuildUrl, nv.Flavor, nv.Build)
+}
+
 var versionToFlavor = map[int]map[int]string{
 	4: {0: "sherlock", 5: "watson"},
 	5: {0: "spock", 5: "vulcan"},
