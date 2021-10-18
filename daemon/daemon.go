@@ -16,6 +16,7 @@ import (
 	"github.com/couchbaselabs/cbdynclusterd/service"
 	"github.com/couchbaselabs/cbdynclusterd/service/cloud"
 	"github.com/couchbaselabs/cbdynclusterd/service/docker"
+	"github.com/couchbaselabs/cbdynclusterd/service/ec2"
 	"github.com/couchbaselabs/cbdynclusterd/store"
 
 	goflag "flag"
@@ -35,19 +36,22 @@ import (
 var (
 	defaultCfgFileName = ".cbdynclusterd.toml"
 
-	dockerRegistry  = "dockerhub.build.couchbase.com"
-	dockerHost      = "/var/run/docker.sock"
-	dnsSvcHost      = ""
-	aliasRepoPath   = helper.AliasRepoPath
-	cloudAccessKey  = ""
-	cloudPrivateKey = ""
-	cloudURL        = "https://cloudapi.cloud.couchbase.com"
-	cloudID         = ""
-	cloudProjectID  = ""
+	dockerRegistry      = "dockerhub.build.couchbase.com"
+	dockerHost          = "/var/run/docker.sock"
+	dnsSvcHost          = ""
+	aliasRepoPath       = helper.AliasRepoPath
+	cloudAccessKey      = ""
+	cloudPrivateKey     = ""
+	cloudURL            = "https://cloudapi.cloud.couchbase.com"
+	cloudID             = ""
+	cloudProjectID      = ""
+	ec2SecurityGroup    = ""
+	ec2KeyName          = ""
+	ec2DownloadPassword = ""
 
 	cfgFileFlag string
 	dockerRegistryFlag, dockerHostFlag, dnsSvcHostFlag, aliasRepoPathFlag, cloudAccessKeyFlag, cloudPrivateKeyFlag,
-	cloudIDFlag, cloudProjectIDFlag string
+	cloudIDFlag, cloudProjectIDFlag, ec2KeyNameFlag, ec2SecurityGroupFlag, ec2DownloadPasswordFlag string
 	dockerPortFlag int32
 )
 
@@ -82,6 +86,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cloudPrivateKeyFlag, "cloud-private-key", "", "Private key to use for cloud requests")
 	rootCmd.PersistentFlags().StringVar(&cloudIDFlag, "cloud-id", "", "Cloud ID use for cloud")
 	rootCmd.PersistentFlags().StringVar(&cloudProjectIDFlag, "cloud-project-id", "", "Project ID to use for cloud")
+	rootCmd.PersistentFlags().StringVar(&ec2KeyNameFlag, "ec2-key-name", "", "SSH key name to use when creating ec2 instances")
+	rootCmd.PersistentFlags().StringVar(&ec2SecurityGroupFlag, "ec2-security-group", "", "Security group to use when creating ec2 instances")
+	rootCmd.PersistentFlags().StringVar(&ec2DownloadPasswordFlag, "ec2-download-password", "", "Password used to download builds from outside the vpn")
 
 	rootCmd.PersistentFlags().Int32Var(&dockerPortFlag, "docker-port", 0, "")
 	rootCmd.PersistentFlags().MarkDeprecated("docker-port", "Deprecated flag to specify the port of the docker host")
@@ -139,8 +146,9 @@ func initConfig() {
 	cloudPrivateKeyFlag = getStringArg("cloud-private-key")
 	cloudIDFlag = getStringArg("cloud-id")
 	cloudProjectID = getStringArg("cloud-project-id")
-
-	fmt.Println(aliasRepoPath)
+	ec2SecurityGroupFlag = getStringArg("ec2-security-group")
+	ec2KeyNameFlag = getStringArg("ec2-key-name")
+	ec2DownloadPasswordFlag = getStringArg("ec2-download-password")
 
 	dockerRegistry = dockerRegistryFlag
 	dockerHost = dockerHostFlag
@@ -150,6 +158,9 @@ func initConfig() {
 	cloudPrivateKey = cloudPrivateKeyFlag
 	cloudID = cloudIDFlag
 	cloudProjectID = cloudProjectIDFlag
+	ec2SecurityGroup = ec2SecurityGroupFlag
+	ec2KeyName = ec2KeyNameFlag
+	ec2DownloadPassword = ec2DownloadPasswordFlag
 
 	if dockerPortFlag > 0 {
 		dockerHost = fmt.Sprintf("tcp://%s:%d", dockerHostFlag, dockerPortFlag)
@@ -180,6 +191,7 @@ type daemon struct {
 
 	dockerService *docker.DockerService
 	cloudService  *cloud.CloudService
+	ec2Service    *ec2.EC2Service
 }
 
 func (d *daemon) openMeta() error {
@@ -214,11 +226,15 @@ func (d *daemon) hasMacvlan0(cli *client.Client) bool {
 }
 
 func (d *daemon) getAllClusters(ctx context.Context) ([]*cluster.Cluster, error) {
+	clusters := []*cluster.Cluster{}
+
 	dockerClusters, err := d.dockerService.GetAllClusters(ctx)
 	if err != nil {
 		log.Printf("Failed to get all clusters %v\n", err)
 		return nil, err
 	}
+
+	clusters = append(clusters, dockerClusters...)
 
 	cloudClusters, err := d.cloudService.GetAllClusters(ctx)
 	if err != nil && !errors.Is(err, cloud.ErrCloudNotEnabled) {
@@ -226,7 +242,17 @@ func (d *daemon) getAllClusters(ctx context.Context) ([]*cluster.Cluster, error)
 		return nil, err
 	}
 
-	return append(dockerClusters, cloudClusters...), nil
+	clusters = append(clusters, cloudClusters...)
+
+	ec2Clusters, err := d.ec2Service.GetAllClusters(ctx)
+	if err != nil && !errors.Is(err, ec2.ErrEC2NotEnabled) {
+		log.Printf("Failed to get all clusters %v\n", err)
+		return nil, err
+	}
+
+	clusters = append(clusters, ec2Clusters...)
+
+	return clusters, nil
 }
 
 func (d *daemon) cleanupClusters() {
@@ -257,8 +283,10 @@ func (d *daemon) cleanupClusters() {
 			var s service.ClusterService
 			if platform == store.ClusterPlatformCloud {
 				s = d.cloudService
-			} else if meta.Platform == store.ClusterPlatformDocker {
+			} else if platform == store.ClusterPlatformDocker {
 				s = d.dockerService
+			} else if platform == store.ClusterPlatformEC2 {
+				s = d.ec2Service
 			} else {
 				log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 				s = d.dockerService
@@ -315,6 +343,7 @@ func newDaemon() *daemon {
 	readOnlyStore := store.NewReadOnlyMetaDataStore(d.metaStore)
 	d.dockerService = docker.NewDockerService(cli, dockerRegistry, dnsSvcHost, aliasRepoPath, readOnlyStore)
 	d.cloudService = cloud.NewCloudService(cloudAccessKey, cloudPrivateKey, cloudID, cloudProjectID, cloudURL, readOnlyStore)
+	d.ec2Service = ec2.NewEC2Service(aliasRepoPath, ec2SecurityGroup, ec2KeyName, ec2DownloadPassword, readOnlyStore)
 
 	// Create a system context to use for system actions (like cleanups)
 	d.systemCtx = dyncontext.NewContext(context.Background(), "system", true)

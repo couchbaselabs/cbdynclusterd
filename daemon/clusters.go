@@ -30,6 +30,8 @@ func (d *daemon) refreshCluster(ctx context.Context, clusterID string, newTimeou
 		s = d.cloudService
 	} else if newMeta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if newMeta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService

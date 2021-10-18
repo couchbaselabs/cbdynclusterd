@@ -14,6 +14,7 @@ type ClusterPlatform string
 const (
 	ClusterPlatformDocker = "docker"
 	ClusterPlatformCloud  = "cloud"
+	ClusterPlatformEC2    = "ec2"
 )
 
 var (

@@ -15,7 +15,7 @@ import (
 	"github.com/couchbaselabs/cbdynclusterd/helper"
 	"github.com/couchbaselabs/cbdynclusterd/service"
 	"github.com/couchbaselabs/cbdynclusterd/service/cloud"
-	"github.com/couchbaselabs/cbdynclusterd/service/docker"
+	"github.com/couchbaselabs/cbdynclusterd/service/common"
 	"github.com/couchbaselabs/cbdynclusterd/store"
 
 	"github.com/gorilla/mux"
@@ -109,17 +109,38 @@ func (d *daemon) HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 		Deadline: time.Now().Add(timeout),
 	}
 
+	var platform = store.ClusterPlatformDocker
+
 	for _, node := range reqData.Nodes {
-		nodeOpts := docker.CreateNodeOptions{
+		nodeOpts := service.CreateNodeOptions{
 			Name:                node.Name,
 			Platform:            node.Platform,
 			ServerVersion:       node.ServerVersion,
 			UseCommunityEdition: node.UseCommunityEdition,
+			OS:                  node.OS,
+			Arch:                node.Arch,
 		}
 		clusterOpts.Nodes = append(clusterOpts.Nodes, nodeOpts)
+		if node.Platform == "ec2" {
+			platform = store.ClusterPlatformEC2
+		} else if node.Platform == "docker" {
+			platform = store.ClusterPlatformDocker
+		} else if node.Platform == "cloud" {
+			platform = store.ClusterPlatformCloud
+		}
 	}
 
-	clusterID, err := d.dockerService.AllocateCluster(reqCtx, clusterOpts)
+	var s service.UnmanagedClusterService
+	if platform == store.ClusterPlatformCloud {
+		writeJSONError(w, errors.New("cannot allocate a cluster using the cloud service"))
+		return
+	} else if platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else if platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
+	}
+
+	clusterID, err := s.AllocateCluster(reqCtx, clusterOpts)
 	if err != nil {
 		writeJSONError(w, err)
 		return
@@ -128,7 +149,7 @@ func (d *daemon) HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 	meta := store.ClusterMeta{
 		Owner:    dyncontext.ContextUser(reqCtx),
 		Timeout:  clusterOpts.Deadline,
-		Platform: store.ClusterPlatformDocker,
+		Platform: store.ClusterPlatform(platform),
 	}
 	if err := d.metaStore.CreateClusterMeta(clusterID, meta); err != nil {
 		writeJSONError(w, err)
@@ -164,6 +185,8 @@ func (d *daemon) HttpGetCluster(w http.ResponseWriter, r *http.Request) {
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -224,7 +247,27 @@ func (d *daemon) HttpSetupCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := d.dockerService.GetCluster(reqCtx, clusterID)
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		writeJSONError(w, errors.New("cannot setup a cloud cluster"))
+		return
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	c, err := s.GetCluster(reqCtx, clusterID)
 	if err != nil {
 		writeJSONError(w, err)
 		return
@@ -313,6 +356,8 @@ func (d *daemon) HttpDeleteCluster(w http.ResponseWriter, r *http.Request) {
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -355,6 +400,8 @@ func (d *daemon) HttpAddBucket(w http.ResponseWriter, r *http.Request) {
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -406,6 +453,8 @@ func (d *daemon) HttpAddSampleBucket(w http.ResponseWriter, r *http.Request) {
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -451,6 +500,8 @@ func (d *daemon) HttpAddCollection(w http.ResponseWriter, r *http.Request) {
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -498,6 +549,8 @@ func (d *daemon) HttpAddIP(w http.ResponseWriter, r *http.Request) {
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -540,6 +593,8 @@ func (d *daemon) HttpAddUser(w http.ResponseWriter, r *http.Request) {
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -582,6 +637,8 @@ func (d *daemon) HttpConnString(w http.ResponseWriter, r *http.Request) {
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -627,6 +684,8 @@ func (d *daemon) HttpSetupClientCertAuth(w http.ResponseWriter, r *http.Request)
 		s = d.cloudService
 	} else if meta.Platform == store.ClusterPlatformDocker {
 		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
 	} else {
 		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
 		s = d.dockerService
@@ -664,7 +723,7 @@ func (d *daemon) HttpBuildImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	image, err := d.dockerService.EnsureImageExists(reqCtx, reqData.ServerVersion, reqData.UseCommunityEdition)
+	image, err := d.dockerService.EnsureImageExists(reqCtx, reqData.ServerVersion, reqData.OS, reqData.Arch, reqData.UseCommunityEdition)
 	if err != nil {
 		writeJSONError(w, err)
 		return
