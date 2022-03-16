@@ -734,7 +734,7 @@ func (d *daemon) HttpConnString(w http.ResponseWriter, r *http.Request) {
 		s = d.dockerService
 	}
 
-	connstr, err := s.ConnString(reqCtx, clusterID, reqData.UseSSL)
+	connstr, err := s.ConnString(reqCtx, clusterID, reqData.UseSSL, reqData.UseSrv)
 	if err != nil {
 		writeJSONError(w, err)
 		return

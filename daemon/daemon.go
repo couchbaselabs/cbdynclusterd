@@ -48,11 +48,13 @@ var (
 	ec2KeyName                = ""
 	ec2DownloadPassword       = ""
 	ec2KeyPath                = ""
+	ec2DomainName             = ""
+	ec2HostedZoneId           = ""
 	dockerMaxContainers int32 = -1
 
 	cfgFileFlag string
 	dockerRegistryFlag, dockerHostFlag, dnsSvcHostFlag, aliasRepoPathFlag, cloudAccessKeyFlag, cloudPrivateKeyFlag,
-	cloudProjectIDFlag, ec2KeyNameFlag, ec2SecurityGroupFlag, ec2DownloadPasswordFlag, ec2KeyPathFlag string
+	cloudProjectIDFlag, ec2KeyNameFlag, ec2SecurityGroupFlag, ec2DownloadPasswordFlag, ec2KeyPathFlag, ec2DomainNameFlag, ec2HostedZoneIdFlag string
 	dockerPortFlag, dockerMaxContainersFlag int32
 )
 
@@ -90,6 +92,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&ec2SecurityGroupFlag, "ec2-security-group", "", "Security group to use when creating ec2 instances")
 	rootCmd.PersistentFlags().StringVar(&ec2DownloadPasswordFlag, "ec2-download-password", "", "Password used to download builds from outside the vpn")
 	rootCmd.PersistentFlags().StringVar(&ec2KeyPathFlag, "ec2-key-path", "", "Path to the SSH private key to connect to ec2 instances")
+	rootCmd.PersistentFlags().StringVar(&ec2DomainNameFlag, "ec2-domain-name", "", "Domain name in route53 to use to craeate srv records")
+	rootCmd.PersistentFlags().StringVar(&ec2HostedZoneIdFlag, "ec2-hosted-zone-id", "", "Hosted zone in route53 to use to craeate srv records")
 	rootCmd.PersistentFlags().Int32Var(&dockerMaxContainersFlag, "docker-max-containers", -1, "Max number of contains to allocate")
 
 	rootCmd.PersistentFlags().Int32Var(&dockerPortFlag, "docker-port", 0, "")
@@ -151,6 +155,8 @@ func initConfig() {
 	ec2KeyNameFlag = getStringArg("ec2-key-name")
 	ec2DownloadPasswordFlag = getStringArg("ec2-download-password")
 	ec2KeyPathFlag = getStringArg("ec2-key-path")
+	ec2DomainNameFlag = getStringArg("ec2-domain-name")
+	ec2HostedZoneIdFlag = getStringArg("ec2-hosted-zone-id")
 	dockerMaxContainersFlag = getInt32Arg("docker-max-containers")
 
 	dockerRegistry = dockerRegistryFlag
@@ -164,6 +170,8 @@ func initConfig() {
 	ec2KeyName = ec2KeyNameFlag
 	ec2DownloadPassword = ec2DownloadPasswordFlag
 	ec2KeyPath = ec2KeyPathFlag
+	ec2DomainName = ec2DomainNameFlag
+	ec2HostedZoneId = ec2HostedZoneIdFlag
 	dockerMaxContainers = dockerMaxContainersFlag
 
 	if dockerPortFlag > 0 {
@@ -347,7 +355,16 @@ func newDaemon() *daemon {
 	readOnlyStore := store.NewReadOnlyMetaDataStore(d.metaStore)
 	d.dockerService = docker.NewDockerService(cli, dockerRegistry, dnsSvcHost, aliasRepoPath, dockerMaxContainers, readOnlyStore)
 	d.cloudService = cloud.NewCloudService(cloudAccessKey, cloudPrivateKey, cloudProjectID, cloudURL, readOnlyStore)
-	d.ec2Service = ec2.NewEC2Service(aliasRepoPath, ec2SecurityGroup, ec2KeyName, ec2KeyPath, ec2DownloadPassword, readOnlyStore)
+	d.ec2Service = ec2.NewEC2Service(&ec2.EC2ServiceOptions{
+		AliasRepoPath:    aliasRepoPath,
+		SecurityGroup:    ec2SecurityGroup,
+		KeyName:          ec2KeyName,
+		KeyPath:          ec2KeyPath,
+		DownloadPassword: ec2DownloadPassword,
+		MetaStore:        readOnlyStore,
+		DomainName:       ec2DomainName,
+		HostedZoneId:     ec2HostedZoneId,
+	})
 
 	// Create a system context to use for system actions (like cleanups)
 	d.systemCtx = dyncontext.NewContext(context.Background(), "system", true)

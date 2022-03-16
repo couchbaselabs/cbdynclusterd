@@ -333,6 +333,9 @@ func (ds *DockerService) AddIP(ctx context.Context, clusterID, ip string) error 
 	return errors.New("not supported")
 }
 
-func (ds *DockerService) ConnString(ctx context.Context, clusterID string, useSSL bool) (string, error) {
+func (ds *DockerService) ConnString(ctx context.Context, clusterID string, useSSL, useSrv bool) (string, error) {
+	if useSrv {
+		return "", errors.New("srv not supported for docker service")
+	}
 	return common.ConnString(ctx, ds, clusterID, useSSL)
 }

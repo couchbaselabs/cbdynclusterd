@@ -265,6 +265,7 @@ type AddUserJSON struct {
 
 type ConnStringJSON struct {
 	UseSSL bool `json:"useSSL"`
+	UseSrv bool `json:"useSrv"`
 }
 
 type ConnStringResponseJSON struct {

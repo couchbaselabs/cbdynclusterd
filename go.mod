@@ -4,9 +4,10 @@ go 1.13
 
 require (
 	github.com/Microsoft/go-winio v0.4.14 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.10.0
+	github.com/aws/aws-sdk-go-v2 v1.15.0
 	github.com/aws/aws-sdk-go-v2/config v1.9.0
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.20.0
+	github.com/aws/aws-sdk-go-v2/service/route53 v1.20.0
 	github.com/couchbaselabs/cbcerthelper v0.0.0-20220203115212-3b5fe2d4c5e2
 	github.com/dgraph-io/badger v1.6.0
 	github.com/docker/distribution v2.7.1+incompatible // indirect

@@ -13,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/route53"
+	route53types "github.com/aws/aws-sdk-go-v2/service/route53/types"
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
 	"github.com/couchbaselabs/cbdynclusterd/dyncontext"
 	"github.com/couchbaselabs/cbdynclusterd/helper"
@@ -27,21 +29,37 @@ var (
 
 type EC2Service struct {
 	enabled          bool
+	route53Enabled   bool
 	metaStore        *store.ReadOnlyMetaDataStore
 	client           *ec2.Client
+	route53Client    *route53.Client
 	aliasRepoPath    string
 	securityGroup    string
 	keyName          string
 	keyPath          string
 	downloadPassword string
+	domainName       string
+	hostedZoneId     string
 
 	buildingImages map[string]chan error
 	mu             sync.Mutex
 }
 
-func NewEC2Service(aliasRepoPath, securityGroup, keyName, keyPath, downloadPassword string, metaStore *store.ReadOnlyMetaDataStore) *EC2Service {
+type EC2ServiceOptions struct {
+	AliasRepoPath    string
+	SecurityGroup    string
+	KeyName          string
+	KeyPath          string
+	DownloadPassword string
+	MetaStore        *store.ReadOnlyMetaDataStore
+	DomainName       string
+	HostedZoneId     string
+}
+
+func NewEC2Service(opts *EC2ServiceOptions) *EC2Service {
 	enabled := true
 	client := &ec2.Client{}
+	route53Client := &route53.Client{}
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRetryer(func() aws.Retryer {
 		return retry.AddWithMaxAttempts(retry.NewStandard(), 0) // keep retrying requests if the error is retryable
 	}))
@@ -49,18 +67,26 @@ func NewEC2Service(aliasRepoPath, securityGroup, keyName, keyPath, downloadPassw
 		enabled = false
 	} else {
 		client = ec2.NewFromConfig(cfg)
+		route53Client = route53.NewFromConfig(cfg)
 	}
-	enabled = enabled && securityGroup != "" && keyName != "" && downloadPassword != ""
+	enabled = enabled && opts.SecurityGroup != "" && opts.KeyName != "" && opts.DownloadPassword != ""
+	route53Enabled := opts.DomainName != "" && opts.HostedZoneId != ""
 	log.Printf("EC2 enabled: %t", enabled)
+	log.Printf("Route53 enabled: %t", route53Enabled)
+
 	return &EC2Service{
 		enabled:          enabled,
-		metaStore:        metaStore,
+		route53Enabled:   route53Enabled,
+		metaStore:        opts.MetaStore,
 		client:           client,
-		aliasRepoPath:    aliasRepoPath,
-		keyName:          keyName,
-		keyPath:          keyPath,
-		securityGroup:    securityGroup,
-		downloadPassword: downloadPassword,
+		aliasRepoPath:    opts.AliasRepoPath,
+		keyName:          opts.KeyName,
+		keyPath:          opts.KeyPath,
+		securityGroup:    opts.SecurityGroup,
+		downloadPassword: opts.DownloadPassword,
+		route53Client:    route53Client,
+		hostedZoneId:     opts.HostedZoneId,
+		domainName:       opts.DomainName,
 
 		buildingImages: make(map[string]chan error),
 	}
@@ -170,6 +196,60 @@ func (s *EC2Service) ensureImageExists(ctx context.Context, nodeVersion *common.
 	s.mu.Lock()
 	delete(s.buildingImages, imageName)
 	s.mu.Unlock()
+
+	return err
+}
+
+func (s *EC2Service) removeSrvRecord(ctx context.Context, cluster *cluster.Cluster) error {
+	return s.changeSrvRecord(ctx, cluster, route53types.ChangeActionDelete)
+}
+
+func (s *EC2Service) createSrvRecord(ctx context.Context, cluster *cluster.Cluster) error {
+	return s.changeSrvRecord(ctx, cluster, route53types.ChangeActionCreate)
+}
+
+func (s *EC2Service) changeSrvRecord(ctx context.Context, cluster *cluster.Cluster, action route53types.ChangeAction) error {
+	hostnames := make([]string, 0, len(cluster.Nodes))
+	for _, node := range cluster.Nodes {
+		hostnames = append(hostnames, node.IPv4Address)
+	}
+
+	changes := make([]route53types.Change, 0, 2)
+
+	type variant struct {
+		port int
+		name string
+	}
+
+	// secure and insecure
+	variants := []variant{{port: 11207, name: "couchbases"}, {port: 11210, name: "couchbase"}}
+
+	for _, variant := range variants {
+		name := fmt.Sprintf("_%s._tcp.%s.%s", variant.name, cluster.ID, s.domainName)
+		records := make([]route53types.ResourceRecord, 0, len(hostnames))
+		for _, hostname := range hostnames {
+			// Format: [priority] [weight] [port] [server host name]
+			records = append(records, route53types.ResourceRecord{
+				Value: aws.String(fmt.Sprintf("0 0 %d %s", variant.port, hostname)),
+			})
+		}
+		changes = append(changes, route53types.Change{
+			Action: action,
+			ResourceRecordSet: &route53types.ResourceRecordSet{
+				Name:            aws.String(name),
+				Type:            route53types.RRTypeSrv,
+				ResourceRecords: records,
+				TTL:             aws.Int64(60),
+			},
+		})
+	}
+
+	_, err := s.route53Client.ChangeResourceRecordSets(ctx, &route53.ChangeResourceRecordSetsInput{
+		ChangeBatch: &route53types.ChangeBatch{
+			Changes: changes,
+		},
+		HostedZoneId: aws.String(s.hostedZoneId),
+	})
 
 	return err
 }
@@ -300,8 +380,16 @@ func (s *EC2Service) allocateNodes(ctx context.Context, clusterID string, opts [
 		InstanceIds: instanceIds,
 	}, 120*time.Second)
 
-	if err != nil {
-		return nil, err
+	if s.route53Enabled {
+		cluster, err := s.GetCluster(ctx, clusterID)
+		if err != nil {
+			return nil, err
+		}
+
+		err = s.createSrvRecord(ctx, cluster)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return instanceIds, nil
@@ -457,10 +545,16 @@ func (s *EC2Service) KillCluster(ctx context.Context, clusterID string) error {
 		nodesToKill = append(nodesToKill, node.ContainerID)
 	}
 
-	killError := s.terminateInstances(ctx, nodesToKill)
+	if s.route53Enabled {
+		err = s.removeSrvRecord(ctx, c)
+		if err != nil {
+			return err
+		}
+	}
 
-	if killError != nil {
-		return killError
+	err = s.terminateInstances(ctx, nodesToKill)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -500,7 +594,14 @@ func (s *EC2Service) AddSampleBucket(ctx context.Context, clusterID string, opts
 	return common.AddSampleBucket(ctx, s, clusterID, opts)
 }
 
-func (s *EC2Service) ConnString(ctx context.Context, clusterID string, useSSL bool) (string, error) {
+func (s *EC2Service) ConnString(ctx context.Context, clusterID string, useSSL, useSrv bool) (string, error) {
+	if useSrv {
+		prefix := "couchbase"
+		if useSSL {
+			prefix = "couchbases"
+		}
+		return fmt.Sprintf("%s://%s.%s", prefix, clusterID, s.domainName), nil
+	}
 	return common.ConnString(ctx, s, clusterID, useSSL)
 }
 

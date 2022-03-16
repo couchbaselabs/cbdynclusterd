@@ -570,7 +570,7 @@ func (cs *CloudService) SetupClusterEncryption(ctx context.Context, clusterID st
 	return errors.New("unsupported operation")
 }
 
-func (cs *CloudService) ConnString(ctx context.Context, clusterID string, useSSL bool) (string, error) {
+func (cs *CloudService) ConnString(ctx context.Context, clusterID string, useSSL, useSrv bool) (string, error) {
 	if !useSSL {
 		return "", errors.New("only SSL supported for cloud")
 	}
