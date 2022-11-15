@@ -26,8 +26,11 @@ type AMIArg struct {
 
 // os -> arch -> ami
 var packageToAMIArg = map[string]map[string]AMIArg{
-	"amzn2":   {"aarch64": AMIArg{SourceAMIFilter: "amzn2-ami-hvm-2.0.*.1-arm64-gp2", Owner: "amazon"}, "x86_64": AMIArg{SourceAMIFilter: "amzn2-ami-hvm-2.0.*.1-x86_64-gp2", Owner: "amazon"}},
-	"centos7": {"x86_64": AMIArg{SourceAMIFilter: "CentOS Linux 7 x86_64 HVM EBS *", Owner: "679593333241"}},
+	"amzn2": {"aarch64": AMIArg{SourceAMIFilter: "amzn2-ami-hvm-2.0.*.1-arm64-gp2", Owner: "amazon"}, "x86_64": AMIArg{SourceAMIFilter: "amzn2-ami-hvm-2.0.*.1-x86_64-gp2", Owner: "amazon"}},
+	// From https://wiki.centos.org/Cloud/AWS
+	// > aws ec2 describe-images --owners aws-marketplace --filters Name=product-code,Values=cvugziknvmxgqna9noibqnnsy | jq '.Images[0].Name'
+	// > "CentOS-7-2111-20220825_1.x86_64-d9a3032a-921c-4c6d-b150-bde168105e42"
+	"centos7": {"x86_64": AMIArg{SourceAMIFilter: "CentOS-7*x86_64*", Owner: "aws-marketplace"}},
 }
 
 var osToSSHUsername = map[string]string{
