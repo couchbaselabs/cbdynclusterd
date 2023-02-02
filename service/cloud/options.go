@@ -17,4 +17,5 @@ type ClusterSetupOptions struct {
 	SingleAZ    *bool
 	EnvName     string
 	Image       string
+	Server      string
 }

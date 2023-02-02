@@ -270,6 +270,7 @@ type CreateCloudClusterJSON struct {
 	SingleAZ    *bool                   `json:"single_az,omitempty"`
 	EnvName     string                  `json:"env_name"`
 	Image       string                  `json:"image"`
+	Server      string                  `json:"server,omitempty"`
 }
 
 type AddIPJSON struct {
