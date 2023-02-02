@@ -994,6 +994,7 @@ func (d *daemon) HttpCreateCloudCluster(w http.ResponseWriter, r *http.Request) 
 		SingleAZ:    reqData.SingleAZ,
 		EnvName:     reqData.EnvName,
 		Image:       reqData.Image,
+		Server:      reqData.Server,
 	}
 
 	err = d.cloudService.SetupCluster(reqCtx, clusterID, clusterOpts, helper.RestTimeout)

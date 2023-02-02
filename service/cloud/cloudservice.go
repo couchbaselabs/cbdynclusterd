@@ -643,6 +643,7 @@ func (cs *CloudService) SetupCluster(ctx context.Context, clusterID string, opts
 		SingleAZ:  singleAZ,
 		Specs:     specs,
 		Package:   defaultSupportPackage,
+		Server:    opts.Server,
 	}
 
 	// Custom image
