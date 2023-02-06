@@ -144,7 +144,7 @@ type setupClusterJson struct {
 	Provider    Provider       `json:"provider"`
 	Region      string         `json:"region"`
 	SingleAZ    bool           `json:"singleAZ"`
-	Server      string         `json:"server"`
+	Server      string         `json:"server,omitempty"`
 	Specs       []Spec         `json:"specs"`
 	Package     SupportPackage `json:"package"`
 }
