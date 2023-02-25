@@ -28,7 +28,6 @@ require (
 	github.com/pkg/sftp v1.11.0
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
-	golang.org/x/crypto v0.0.0-20200403201458-baeed622b8d8
-	golang.org/x/sys v0.0.0-20220627191245-f75cf1eec38b // indirect
+	golang.org/x/crypto v0.1.0
 	gopkg.in/yaml.v2 v2.2.8
 )
