@@ -94,7 +94,7 @@ var versionToFlavor = map[int]map[int]string{
 	4: {0: "sherlock", 5: "watson"},
 	5: {0: "spock", 5: "vulcan"},
 	6: {0: "alice", 5: "mad-hatter"},
-	7: {0: "cheshire-cat", 1: "neo", 2: "neo", 5: "elixir"},
+	7: {0: "cheshire-cat", 1: "neo", 2: "neo", 5: "elixir", 6: "trinity"},
 	8: {0: "morpheus"},
 }
 
@@ -158,7 +158,7 @@ func ParseServerVersion(version, os, arch string, useCE, serverlessMode bool) (*
 }
 
 func AliasServerVersion(version, aliasRepoPath string) (string, error) {
-	//Check for aliasing format: M.m-stable/release
+	// Check for aliasing format: M.m-stable/release
 	buildParts := strings.Split(version, "-")
 	if len(buildParts) < 2 {
 		return version, nil
@@ -178,7 +178,7 @@ func AliasServerVersion(version, aliasRepoPath string) (string, error) {
 	if buildParts[1] == "release" {
 		serverBuild = p["couchbase-server"][buildParts[0]].Release
 	} else if buildParts[1] == "stable" {
-		//Stable version should always have a result
+		// Stable version should always have a result
 		serverBuild = p["couchbase-server"][buildParts[0]].Stable
 	}
 
