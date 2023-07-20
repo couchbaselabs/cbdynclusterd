@@ -1,4 +1,4 @@
-FROM dockerhub.build.couchbase.com/base.centos7
+FROM dockerhub.qe.couchbase.com/base.centos7
 
 RUN mkdir /var/run/sshd
 RUN echo 'root:couchbase' | chpasswd
