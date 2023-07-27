@@ -631,6 +631,10 @@ func (cs *CloudService) SetupCluster(ctx context.Context, clusterID string, opts
 			Services: services,
 			Compute:  compute,
 			Disk:     disk,
+			DiskAutoScaling: DiskAutoScaling{
+				//Now required for AWS and GCP. Not available for Azure yet
+				Enabled: provider != ProviderAzure,
+			},
 		})
 	}
 

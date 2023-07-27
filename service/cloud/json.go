@@ -128,11 +128,16 @@ type Disk struct {
 	IOPS     *int     `json:"iops,omitempty"`
 }
 
+type DiskAutoScaling struct {
+	Enabled bool `json:"enabled"`
+}
+
 type Spec struct {
-	Count    uint32   `json:"count"`
-	Services Services `json:"services"`
-	Compute  Instance `json:"compute"`
-	Disk     Disk     `json:"disk"`
+	Count           uint32          `json:"count"`
+	Services        Services        `json:"services"`
+	Compute         Instance        `json:"compute"`
+	Disk            Disk            `json:"disk"`
+	DiskAutoScaling DiskAutoScaling `json:"diskAutoScaling,omitempty"`
 }
 
 type setupClusterJson struct {
