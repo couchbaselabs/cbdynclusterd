@@ -153,7 +153,11 @@ func SetupCertAuth(ctx context.Context, s service.ClusterService, clusterID stri
 	initialNodes := c.Nodes
 	var nodes []Node
 	for _, node := range initialNodes {
-		nodes = append(nodes, *NewNode(node.IPv4Address, node.InitialServerVersion, connCtx))
+		if node.Hostname != "" {
+			nodes = append(nodes, *NewNode(node.Hostname, node.InitialServerVersion, connCtx))
+		} else {
+			nodes = append(nodes, *NewNode(node.IPv4Address, node.InitialServerVersion, connCtx))
+		}
 	}
 
 	return setupCertAuth(opts.UserName, opts.UserEmail, nodes, opts.NumRoots)
