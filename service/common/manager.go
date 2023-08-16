@@ -248,6 +248,10 @@ func (m *Manager) setupNewCluster() (string, error) {
 				glog.Infof("Adding %s to %s again", n.HostName, epnode.HostName)
 				err = epnode.AddNode(n, n.Services)
 			}
+			if strings.Contains(err.Error(), "Prepare join failed. Node is already part of cluster.") {
+				glog.Infof("Node is already part of the cluster, no need to add")
+				err = nil
+			}
 			if err != nil {
 				return "", err
 			}
