@@ -427,7 +427,8 @@ func (s *EC2Service) changeARecords(ctx context.Context, cluster *cluster.Cluste
 }
 
 func (s *EC2Service) runInstances(ctx context.Context, clusterID, serverVersion string, ami *string, instanceCount int, instanceType types.InstanceType) ([]string, error) {
-	useSpotMarket := true
+	// Disabling spot market for now as most instances are getting terminated mid run
+	useSpotMarket := false
 
 	for {
 		input := &ec2.RunInstancesInput{
