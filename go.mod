@@ -12,7 +12,7 @@ require (
 	github.com/couchbaselabs/cbcerthelper v0.0.0-20220203115212-3b5fe2d4c5e2
 	github.com/dgraph-io/badger v1.6.0
 	github.com/docker/distribution v2.7.1+incompatible // indirect
-	github.com/docker/docker v1.13.1
+	github.com/docker/docker v24.0.7+incompatible
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/go-git/go-git/v5 v5.1.0
@@ -23,12 +23,15 @@ require (
 	github.com/jhoonb/archivex v0.0.0-20180718040744-0488e4ce1681
 	github.com/kr/pty v1.1.8 // indirect
 	github.com/mitchellh/go-homedir v1.1.0
+	github.com/moby/term v0.5.0 // indirect
+	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0-rc1 // indirect
+	github.com/opencontainers/image-spec v1.0.2 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/pkg/sftp v1.11.0
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
-	golang.org/x/crypto v0.0.0-20200403201458-baeed622b8d8
-	golang.org/x/sys v0.0.0-20220627191245-f75cf1eec38b // indirect
+	golang.org/x/crypto v0.1.0
 	gopkg.in/yaml.v2 v2.2.8
+	gotest.tools/v3 v3.5.1 // indirect
 )
