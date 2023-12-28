@@ -58,6 +58,7 @@ const (
 	PFailover                = "/controller/failOver"
 	PEject                   = "/controller/ejectNode"
 	PSetupServices           = "/node/controller/setupServices"
+	ClusterInit              = "/clusterInit"
 	PPoolsDefault            = "/pools/default"
 	PSettingsWeb             = "/settings/web"
 	PRbacUsers               = "/settings/rbac/users/local"

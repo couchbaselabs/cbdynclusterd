@@ -42,7 +42,7 @@ func NewNode(hostname string, clusterVersion string, connCtx service.ConnectCont
 	}
 }
 
-func SetupCluster(opts ClusterSetupOptions, connCtx service.ConnectContext) (string, error) {
+func SetupCluster(opts service.ClusterSetupOptions, connCtx service.ConnectContext) (string, error) {
 	services := opts.Services
 	clusterVersion := opts.Nodes[0].InitialServerVersion
 
@@ -106,7 +106,7 @@ func AddSampleBucket(ctx context.Context, s service.ClusterService, clusterID st
 	}
 
 	if helper.SampleBucketsCount[opts.SampleBucket] == 0 {
-		return errors.New("Unknown sample bucket")
+		return errors.New("unknown sample bucket")
 	}
 
 	if len(c.Nodes) == 0 {

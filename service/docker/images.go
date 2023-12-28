@@ -27,11 +27,6 @@ type imageEvent struct {
 	} `json:"progressDetail"`
 }
 
-type imageBuildArgs struct {
-	Version string
-	BuildNo string
-}
-
 func (ds *DockerService) imagePush(ctx context.Context, nodeVersion *common.NodeVersion) error {
 	eventReader, err := ds.docker.ImagePush(ctx, nodeVersion.ToImageName(ds.dockerRegistry), types.ImagePushOptions{
 		RegistryAuth: ds.dockerRegistry,
@@ -79,6 +74,9 @@ func (ds *DockerService) imageBuild(ctx context.Context, nodeVersion *common.Nod
 	}
 
 	buildCtx, err := os.Open(tarPath)
+	if err != nil {
+		return err
+	}
 	defer buildCtx.Close()
 
 	resp, err := ds.docker.ImageBuild(ctx, buildCtx, types.ImageBuildOptions{

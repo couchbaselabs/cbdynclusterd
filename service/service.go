@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
+	"github.com/couchbaselabs/cbdynclusterd/helper"
 )
 
 type CertAuthResult struct {
@@ -43,6 +44,18 @@ type ConnectContext struct {
 	SshKeyPath   string
 }
 
+type ClusterSetupOptions struct {
+	Services            []string
+	Nodes               []*cluster.Node
+	UseHostname         bool
+	UseIpv6             bool
+	MemoryQuota         string
+	User                *helper.UserOption
+	StorageMode         string
+	Bucket              *helper.BucketOption
+	UseDeveloperPreview bool
+}
+
 type ClusterService interface {
 	GetCluster(ctx context.Context, clusterID string) (*cluster.Cluster, error)
 	GetAllClusters(ctx context.Context) ([]*cluster.Cluster, error)
@@ -62,6 +75,7 @@ type UnmanagedClusterService interface {
 	ClusterService
 	AllocateCluster(ctx context.Context, opts AllocateClusterOptions) error
 	RunCBCollect(ctx context.Context, clusterID string) (*CBCollectResult, error)
+	SetupCluster(clusterID string, opts ClusterSetupOptions) (string, error)
 }
 
 var MaxCapacityError = errors.New("max capacity reached")

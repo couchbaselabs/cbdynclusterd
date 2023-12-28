@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"errors"
 	"io/ioutil"
 	"log"
@@ -38,20 +39,20 @@ func parseYaml(data []byte) (Products, error) {
 }
 
 //Clones/pulls the github alias repo
-func GetConfigRepo(aliasRepoPath string) error {
+func GetConfigRepo(ctx context.Context, aliasRepoPath string) error {
 	log.Printf("Cloning products repo to %s", aliasRepoPath)
-	_, err := git.PlainClone(aliasRepoPath, false, &git.CloneOptions{
+	_, err := git.PlainCloneContext(ctx, aliasRepoPath, false, &git.CloneOptions{
 		URL:      helper.AliasRepo,
 		Progress: os.Stdout,
 	})
 
 	if errors.Is(err, git.ErrRepositoryAlreadyExists) {
-		return pullConfigRepo(aliasRepoPath)
+		return pullConfigRepo(ctx, aliasRepoPath)
 	}
 	return err
 }
 
-func pullConfigRepo(aliasRepoPath string) error {
+func pullConfigRepo(ctx context.Context, aliasRepoPath string) error {
 	r, err := git.PlainOpen(aliasRepoPath)
 	if err != nil {
 		return err
@@ -63,7 +64,7 @@ func pullConfigRepo(aliasRepoPath string) error {
 	}
 
 	log.Printf("Pulling products repo")
-	err = w.Pull(&git.PullOptions{RemoteName: "origin"})
+	err = w.PullContext(ctx, &git.PullOptions{RemoteName: "origin"})
 	if errors.Is(err, git.NoErrAlreadyUpToDate) {
 		log.Printf("%v", err)
 		return nil

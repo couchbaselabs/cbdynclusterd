@@ -1,6 +1,7 @@
 package ec2
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,7 +49,7 @@ var osToDeviceName = map[string]string{
 	"centos7": "/dev/sda1",
 }
 
-func CallPacker(opts PackerOptions) error {
+func CallPacker(ctx context.Context, opts PackerOptions) error {
 	filePath := fmt.Sprintf("packerfiles/aws-%s.pkr.hcl", osToPackerfilePrefix[opts.OS])
 
 	err := exec.Command("packer", "init", filePath).Run()
@@ -70,7 +71,7 @@ func CallPacker(opts PackerOptions) error {
 	addArg(&args, "serverless_mode="+fmt.Sprintf("%t", opts.ServerlessMode))
 	args = append(args, filePath)
 
-	cmd := exec.Command("packer", args...)
+	cmd := exec.CommandContext(ctx, "packer", args...)
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

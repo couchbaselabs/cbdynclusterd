@@ -200,7 +200,7 @@ func (ds *DockerService) AllocateCluster(ctx context.Context, opts service.Alloc
 		return errors.New("cannot allocate clusters with more than 10 nodes")
 	}
 
-	if err := common.GetConfigRepo(ds.aliasRepoPath); err != nil {
+	if err := common.GetConfigRepo(ctx, ds.aliasRepoPath); err != nil {
 		log.Printf("Get config failed: %v", err)
 		return err
 	}
@@ -348,4 +348,8 @@ func (ds *DockerService) ConnString(ctx context.Context, clusterID string, useSS
 
 func (ds *DockerService) RunCBCollect(ctx context.Context, clusterID string) (*service.CBCollectResult, error) {
 	return common.RunCBCollect(ctx, ds, clusterID, service.ConnectContext{})
+}
+
+func (ds *DockerService) SetupCluster(clusterID string, opts service.ClusterSetupOptions) (string, error) {
+	return common.SetupCluster(opts, service.ConnectContext{})
 }

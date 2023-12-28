@@ -103,12 +103,12 @@ func flavorFromVersion(version string) (string, error) {
 
 	major, err := strconv.Atoi(versionSplit[0])
 	if err != nil {
-		return "", errors.New("Could not convert version major to int")
+		return "", errors.New("could not convert version major to int")
 	}
 
 	minor, err := strconv.Atoi(versionSplit[1])
 	if err != nil {
-		return "", errors.New("Could not convert version minor to int")
+		return "", errors.New("could not convert version minor to int")
 	}
 
 	flavor, ok := versionToFlavor[major][minor]
@@ -179,7 +179,7 @@ func AliasServerVersion(version, aliasRepoPath string) (string, error) {
 	}
 
 	if serverBuild == "" {
-		return "", fmt.Errorf("No build version found for %s", version)
+		return "", fmt.Errorf("no build version found for %s", version)
 	}
 
 	log.Printf("Using %s version for %s -> %s", buildParts[1], buildParts[0], serverBuild)

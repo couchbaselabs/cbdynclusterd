@@ -1,15 +1,12 @@
 package common
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/couchbaselabs/cbdynclusterd/cluster"
@@ -58,37 +55,6 @@ type Config struct {
 	UseDevPreview bool
 }
 
-func (m *Manager) GetMemUsedStats(bucket string) (*helper.MemUsedStats, error) {
-	ret := &helper.MemUsedStats{}
-	for _, n := range m.Nodes {
-		curr, err := n.GetMemUsedStats(bucket)
-		if err != nil {
-			return nil, err
-		}
-		ret.Uncompressed += curr.Uncompressed
-		ret.Used += curr.Used
-	}
-	return ret, nil
-}
-
-func (m *Manager) ScpToLocal(hostname, src, dest string) error {
-	for _, nn := range m.Nodes {
-		if nn.HostName == hostname {
-			return nn.ScpToLocal(src, dest)
-		}
-	}
-	return errors.New("Can not find matching host" + hostname)
-}
-
-func (m *Manager) ScpToLocalDir(hostname, src, dest string) error {
-	for _, nn := range m.Nodes {
-		if nn.HostName == hostname {
-			return nn.ScpToLocalDir(src, dest)
-		}
-	}
-	return errors.New("Can not find matching host" + hostname)
-}
-
 func (m *Manager) StartCluster() (string, error) {
 	existingCluster := make(map[string][]*Node)
 	// Ensure we can connect to the REST port
@@ -121,38 +87,9 @@ func (m *Manager) StartCluster() (string, error) {
 			}
 		}
 	}
-	wg := sync.WaitGroup{}
-	for _, n := range m.Nodes {
-		wg.Add(1)
-		glog.Infof("Calling n.StartServer for n:%p:%s", n, n.HostName)
-		go n.StartServer(&wg)
-	}
-	wg.Wait()
 
 	glog.Info("Server started. Setting up a cluster")
 	return m.setupNewCluster()
-}
-
-func (m *Manager) Rebalance() error {
-	epnode := m.Nodes[m.epNode]
-
-	// in case rebalance fails, just try one more time
-	numRetry := 2
-	for i := 0; i < numRetry; i++ {
-		if err := epnode.Rebalance(nil, nil, nil); err != nil {
-			return err
-		}
-		err := epnode.PollRebalance()
-		if err == nil {
-			break
-		} else if i < numRetry {
-			glog.Infof("Rebalance failed, retrying:%s", err)
-		} else {
-			glog.Infof("Rebalance failed, exiting:%s", err)
-			return err
-		}
-	}
-	return nil
 }
 
 func (m *Manager) pollJoinReadyAll(epnode *Node) error {
@@ -180,7 +117,7 @@ func (m *Manager) pollJoinReadyAll(epnode *Node) error {
 				glog.Infof("%d/%d node is ready to join", finished, size)
 			}
 		case <-time.After(helper.RestTimeout):
-			return errors.New("Timeout while polling rest of nodes")
+			return errors.New("timeout while polling rest of nodes")
 		}
 	}
 }
@@ -194,24 +131,13 @@ func (m *Manager) setupNewCluster() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	glog.Infof("Set data memory quota to %d", memoryQuota)
-	if err := epnode.SetupMemoryQuota(memoryQuota); err != nil {
-		return "", err
+
+	clusterInitOpts := ClusterInitOpts{
+		KVMemoryQuota:      memoryQuota,
+		IndexerStorageMode: m.Config.StorageMode,
 	}
 
-	if m.Config.UseHostname {
-		glog.Infof("Set hostname to entry point node")
-		if err := epnode.Rename(epnode.HostName); err != nil {
-			return "", err
-		}
-	}
-
-	glog.Info("SetupInititalService")
-	if err := epnode.SetupInitialService(); err != nil {
-		return "", err
-	}
-
-	if err := epnode.InitNewCluster(m.Config); err != nil {
+	if err := epnode.ClusterInit(clusterInitOpts); err != nil {
 		return "", err
 	}
 
@@ -292,11 +218,6 @@ func (m *Manager) setupNewCluster() (string, error) {
 	return fmt.Sprintf("http://%s:%s", epnode.HostName, epnode.Port), nil
 }
 
-func (m *Manager) PollCompressionMode(bucket, mode string) error {
-	epnode := m.Nodes[m.epNode]
-	return epnode.PollCompressionMode(bucket, mode)
-}
-
 func getEpNode(force bool, nodes []*Node) (*Node, error) {
 	// select epnode (entry point node)
 	var epnode *Node
@@ -312,7 +233,7 @@ func getEpNode(force bool, nodes []*Node) (*Node, error) {
 		}
 	}
 	if epnode == nil {
-		return nil, errors.New("Could not find active nodes")
+		return nil, errors.New("could not find active nodes")
 	}
 	return epnode, nil
 }
@@ -517,71 +438,4 @@ func (m *Manager) SetupBucket(bucketName, bucketType, bucketPassword string, sto
 	}
 
 	return m.Nodes[m.epNode].WaitForBucketReady()
-}
-
-func getNodes(ini []string) []*Node {
-	var nodes []*Node
-	for _, spec := range ini {
-		nodeInfo := strings.Split(spec, ":")
-		host := nodeInfo[0]
-		port := nodeInfo[1]
-		version := nodeInfo[2]
-		services := nodeInfo[3]
-		nodes = append(nodes, fromSpec(host, port, version, services))
-	}
-
-	return nodes
-}
-
-func fromSpec(host, port, version, services string) *Node {
-
-	nPort := 8091
-	if len(port) > 0 {
-		num, err := strconv.Atoi(port)
-		if err != nil {
-			panic(err)
-		}
-		nPort = num
-	}
-	nodeHost := &Node{
-		HostName:  host,
-		Port:      strconv.Itoa(nPort),
-		SshLogin:  &helper.Cred{Username: "root", Password: "couchbase", Hostname: host, Port: 22},
-		RestLogin: &helper.Cred{Username: RestUsername, Password: RestPassword, Hostname: host, Port: nPort},
-		N1qlLogin: &helper.Cred{Username: RestUsername, Password: RestPassword, Hostname: host, Port: 8093},
-		FtsLogin:  &helper.Cred{Username: RestUsername, Password: RestPassword, Hostname: host, Port: 8094},
-		Version:   version,
-		Services:  services,
-	}
-
-	return nodeHost
-
-}
-
-func parse(iniFileName string) ([]string, error) {
-
-	file, err := os.Open(iniFileName)
-
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	var parsed []string
-	// currently we parse only 'node'
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line[0] == '#' {
-			continue
-		}
-		lineSlice := strings.Split(strings.TrimSpace(line), "=")
-		if len(lineSlice) == 2 && lineSlice[0] == "node" {
-			parsed = append(parsed, lineSlice[1])
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return parsed, nil
 }
