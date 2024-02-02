@@ -239,3 +239,13 @@ type getNodesJson struct {
 		} `json:"data"`
 	} `json:"data"`
 }
+
+type GetTrustedCAsResponse []GetTrustedCAsResponse_Certificate
+
+type GetTrustedCAsResponse_Certificate struct {
+	ID        int    `json:"id"`
+	Subject   string `json:"subject"`
+	NotBefore string `json:"notBefore"`
+	NotAfter  string `json:"notAfter"`
+	Pem       string `json:"pem"`
+}

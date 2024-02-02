@@ -847,3 +847,35 @@ func (cs *CloudService) getCloudClusterEnv(ctx context.Context, clusterID string
 
 	return meta.CloudClusterID, env, nil
 }
+
+func (cs *CloudService) GetCertificate(ctx context.Context, clusterID string) (string, error) {
+	cloudClusterId, env, err := cs.getCloudClusterEnv(ctx, clusterID)
+	if err != nil {
+		return "", err
+	}
+
+	path := fmt.Sprintf("/v2/databases/%s/proxy/pools/default/trustedCAs", cloudClusterId)
+	res, err := cs.client.doInternal(ctx, "GET", path, nil, false, env)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		bb, err := ioutil.ReadAll(res.Body)
+		return "", fmt.Errorf("get capella trusted CAs failed: %s, %v", string(bb), err)
+	}
+
+	bb, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return "", fmt.Errorf("get certificate succeeded: but body could not be read: %v", err)
+	}
+
+	respBody := &GetTrustedCAsResponse{}
+	if err := json.Unmarshal(bb, &respBody); err != nil {
+		return "", err
+	}
+	lastCert := (*respBody)[len(*respBody)-1]
+
+	return strings.TrimSpace(lastCert.Pem), nil
+}

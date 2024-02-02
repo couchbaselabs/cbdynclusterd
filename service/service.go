@@ -56,6 +56,7 @@ type ClusterService interface {
 	AddUser(ctx context.Context, clusterID string, opts AddUserOptions, connCtx ConnectContext) error
 	ConnString(ctx context.Context, clusterID string, useSSL bool, useSrv bool) (string, error)
 	SetupClusterEncryption(ctx context.Context, clusterID string, opts SetupClusterEncryptionOptions, connCtx ConnectContext) error
+	GetCertificate(ctx context.Context, clusterID string) (string, error)
 }
 
 type UnmanagedClusterService interface {
