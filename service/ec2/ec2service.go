@@ -904,3 +904,7 @@ func (s *EC2Service) SetupTrustedCert(ctx context.Context, clusterID string) err
 
 	return err
 }
+
+func (s *EC2Service) GetCertificate(ctx context.Context, clusterID string) (string, error) {
+	return "", errors.New("not currently supported")
+}

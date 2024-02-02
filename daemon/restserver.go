@@ -1094,6 +1094,43 @@ func (d *daemon) HttpCBCollect(w http.ResponseWriter, r *http.Request) {
 	writeJsonResponse(w, resultJson)
 }
 
+func (d *daemon) HttpGetClusterCertificate(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	meta, err := d.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		writeJSONError(w, err)
+		return
+	}
+
+	var s service.ClusterService
+	if meta.Platform == store.ClusterPlatformCloud {
+		s = d.cloudService
+	} else if meta.Platform == store.ClusterPlatformDocker {
+		s = d.dockerService
+	} else if meta.Platform == store.ClusterPlatformEC2 {
+		s = d.ec2Service
+	} else {
+		log.Printf("Cluster found with no platform, assuming docker: %s", clusterID)
+		s = d.dockerService
+	}
+
+	c, err := s.GetCertificate(reqCtx, clusterID)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	writeJsonResponse(w, c)
+}
+
 func (d *daemon) createRESTRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/", d.HttpRoot)
@@ -1118,5 +1155,6 @@ func (d *daemon) createRESTRouter() *mux.Router {
 	r.HandleFunc("/register-cloud-cluster", d.HttpRegisterCloudCluster).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}/cbcollect", d.HttpCBCollect).Methods("GET")
 	r.HandleFunc("/cluster/{cluster_id}/setup-trusted-cert", d.HttpSetupTrustedCert).Methods("POST")
+	r.HandleFunc("/cluster/{cluster_id}/certificate", d.HttpGetClusterCertificate).Methods("GET")
 	return r
 }
