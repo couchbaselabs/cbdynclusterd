@@ -55,6 +55,7 @@ type ClusterMetaJSON struct {
 	OS               string            `json:"os,omitempty"`
 	CloudEnvironment *CloudEnvironment `json:"cloudEnvironment,omitempty"`
 	CloudEnvName     string            `json:"cloudEnvName,omitempty"`
+	Columnar         bool              `json:"columnar,omitempty"`
 }
 
 type ClusterMeta struct {
@@ -66,6 +67,7 @@ type ClusterMeta struct {
 	OS               string
 	CloudEnvironment *CloudEnvironment
 	CloudEnvName     string
+	Columnar         bool
 }
 
 type MetaDataStore struct {
@@ -96,6 +98,7 @@ func (store *MetaDataStore) serializeMeta(meta ClusterMeta) ([]byte, error) {
 		OS:               meta.OS,
 		CloudEnvironment: meta.CloudEnvironment,
 		CloudEnvName:     meta.CloudEnvName,
+		Columnar:         meta.Columnar,
 	}
 
 	metaBytes, err := json.Marshal(metaJSON)
@@ -127,6 +130,7 @@ func (store *MetaDataStore) deserializeMeta(bytes []byte) (ClusterMeta, error) {
 		OS:               metaJSON.OS,
 		CloudEnvironment: metaJSON.CloudEnvironment,
 		CloudEnvName:     metaJSON.CloudEnvName,
+		Columnar:         metaJSON.Columnar,
 	}, nil
 }
 

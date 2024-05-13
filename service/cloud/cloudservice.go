@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,6 +117,34 @@ func (cs *CloudService) getCluster(ctx context.Context, cloudClusterID string, e
 	return &respBody, nil
 }
 
+func (cs *CloudService) getColumnar(ctx context.Context, cloudClusterID string, env *store.CloudEnvironment) (*getColumnarJSON, error) {
+	res, err := cs.client.DoInternal(ctx, "GET", fmt.Sprintf(createColumnarPath+"/%s", env.TenantID, env.ProjectID, cloudClusterID), nil, env)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		bb, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return nil, fmt.Errorf("get columnar failed: reason could not be determined: %v", err)
+		}
+		return nil, fmt.Errorf("get columnar failed: %s", string(bb))
+	}
+
+	bb, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("get columnar succeeded: but body could not be read: %v", err)
+	}
+
+	var respBody getColumnarJSON
+	if err := json.Unmarshal(bb, &respBody); err != nil {
+		return nil, err
+	}
+
+	return &respBody, nil
+}
+
 func (cs *CloudService) addBucket(ctx context.Context, clusterID, cloudClusterID string, opts service.AddBucketOptions, env *store.CloudEnvironment) error {
 	log.Printf("Running cloud CreateBucket for %s: %s", clusterID, cloudClusterID)
 
@@ -183,6 +212,37 @@ func (cs *CloudService) addIP(ctx context.Context, clusterID, cloudClusterID, ip
 	return nil
 }
 
+func (cs *CloudService) addColumnarIP(ctx context.Context, clusterID, cloudClusterID, ip string, env *store.CloudEnvironment) error {
+	log.Printf("Running cloud AddIP for %s: %s", clusterID, cloudClusterID)
+
+	body := allowListJSON{
+		CIDR:    ip,
+		Comment: "Any IP",
+	}
+
+	res, err := cs.client.DoInternal(ctx, "POST", fmt.Sprintf(addColumnarIPPath, env.TenantID, env.ProjectID, cloudClusterID), body, env)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		bb, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return fmt.Errorf("add ip failed: reason could not be determined: %v", err)
+		}
+		errorBody := string(bb)
+		// AV-35851: Cluster randomly goes into deploying state after adding IP
+		if strings.Contains(errorBody, "ErrClusterStateNotNormal") {
+			time.Sleep(time.Second * 5)
+			return cs.addIP(ctx, clusterID, cloudClusterID, ip, env)
+		}
+		return fmt.Errorf("add ip failed: %s", string(bb))
+	}
+
+	return nil
+}
+
 func (cs *CloudService) killCluster(ctx context.Context, clusterID, cloudClusterID string, env *store.CloudEnvironment) error {
 	log.Printf("Running cloud KillCluster for %s: %s", clusterID, cloudClusterID)
 
@@ -200,6 +260,29 @@ func (cs *CloudService) killCluster(ctx context.Context, clusterID, cloudCluster
 		}
 		log.Printf("failed to kill cluster: %s: %s: %s", clusterID, cloudClusterID, string(bb))
 		return fmt.Errorf("kill cluster failed: %s", string(bb))
+	}
+
+	return nil
+}
+
+func (cs *CloudService) killColumnar(ctx context.Context, clusterID, cloudClusterID string, env *store.CloudEnvironment) error {
+	log.Printf("Running cloud KillColumnar for %s: %s", clusterID, cloudClusterID)
+
+	path := fmt.Sprintf("/v2/organizations/%s/projects/%s/instance/%s", env.TenantID, env.ProjectID, cloudClusterID)
+	res, err := cs.client.DoInternal(ctx, "DELETE", path, nil, env)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		bb, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			log.Printf("failed to kill columnar cluster: %s: %s", clusterID, cloudClusterID)
+			return fmt.Errorf("kill columnar cluster failed: reason could not be determined: %v", err)
+		}
+		log.Printf("failed to kill columnar: %s: %s: %s", clusterID, cloudClusterID, string(bb))
+		return fmt.Errorf("kill columnar failed: %s", string(bb))
 	}
 
 	return nil
@@ -350,6 +433,52 @@ func (cs *CloudService) GetCluster(ctx context.Context, clusterID string) (*clus
 	}, nil
 }
 
+func (cs *CloudService) GetColumnar(ctx context.Context, clusterID string) (*cluster.Cluster, error) {
+	if !cs.enabled {
+		return nil, ErrCloudNotEnabled
+	}
+
+	_, env, err := cs.getCloudClusterEnv(ctx, clusterID)
+	if err != nil {
+		return nil, err
+	}
+
+	meta, err := cs.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		return nil, err
+	}
+
+	if meta.CloudClusterID == "" {
+		log.Printf("Encountered columnar with no cloud cluster ID: %s", clusterID)
+		return nil, errors.New("unknown cluster")
+	}
+
+	log.Printf("Running cloud GetColumnar for %s: %s", clusterID, meta.CloudClusterID)
+
+	c, err := cs.getColumnar(ctx, meta.CloudClusterID, env)
+	if err != nil {
+		return nil, err
+	}
+
+	var nodes []*cluster.Node
+	nodes = append(nodes, &cluster.Node{
+		ContainerID:          c.Data.Id,
+		Name:                 c.Data.Name,
+		InitialServerVersion: strconv.Itoa(c.Data.Version),
+	})
+
+	return &cluster.Cluster{
+		ID:         clusterID,
+		Creator:    meta.Owner,
+		Owner:      meta.Owner,
+		Timeout:    meta.Timeout,
+		Nodes:      nodes,
+		EntryPoint: c.Data.Config.Endpoint,
+		Status:     c.Data.State,
+	}, nil
+}
+
 func (cs *CloudService) AddUser(ctx context.Context, clusterID string, opts service.AddUserOptions, connCtx service.ConnectContext) error {
 	if !cs.enabled {
 		return ErrCloudNotEnabled
@@ -380,7 +509,9 @@ func (cs *CloudService) AddIP(ctx context.Context, clusterID, ip string) error {
 func (cs *CloudService) getAllClusters(ctx context.Context, env *store.CloudEnvironment) ([]*cluster.Cluster, error) {
 	// TODO: Implement pagination
 	// TODO: Support listing get all clusters across custom environments
-	res, err := cs.client.Do(ctx, "GET", getAllClustersPath+fmt.Sprintf("?perPage=1000&projectId=%s", env.ProjectID), nil, env)
+	//res, err := cs.client.Do(ctx, "GET", getAllClustersPath+fmt.Sprintf("?perPage=1000&projectId=%s", env.ProjectID), nil, env)
+	res, err := cs.client.DoInternal(ctx, "GET", fmt.Sprintf("/v2/organizations/%s/clusters?page=1&perPage=1000&projectId=%s", env.TenantID, env.ProjectID), nil, env)
+
 	if err != nil {
 		return nil, err
 	}
@@ -399,16 +530,70 @@ func (cs *CloudService) getAllClusters(ctx context.Context, env *store.CloudEnvi
 		return nil, fmt.Errorf("get all clusters succeeded: but body could not be read: %v", err)
 	}
 
-	var respBody getAllClustersJSON
+	//var respBody getAllClustersJSON
+	var respBody getAllClustersInternalJSON
 	if err := json.Unmarshal(bb, &respBody); err != nil {
 		return nil, err
 	}
 
 	var clusters []*cluster.Cluster
-	for _, d := range respBody.Data.Items {
-		c, err := cs.GetCluster(ctx, d.Name)
+	for _, d := range respBody.Data {
+		if d.Items.Project.ID != env.ProjectID {
+			continue
+		}
+		c, err := cs.GetCluster(ctx, d.Items.Name)
 		if err != nil {
-			log.Printf("Failed to get cluster: %s: %v", d.Name, err)
+			log.Printf("Failed to get cluster: %s: %v", d.Items.Name, err)
+			continue
+		}
+
+		if !dyncontext.ContextIgnoreOwnership(ctx) && c.Owner != dyncontext.ContextUser(ctx) {
+			continue
+		}
+
+		clusters = append(clusters, c)
+	}
+
+	return clusters, nil
+}
+
+func (cs *CloudService) getAllColumnars(ctx context.Context, env *store.CloudEnvironment) ([]*cluster.Cluster, error) {
+	// TODO: Implement pagination
+	// TODO: Support listing get all clusters across custom environments
+	//res, err := cs.client.Do(ctx, "GET", getAllClustersPath+fmt.Sprintf("?perPage=1000&projectId=%s", env.ProjectID), nil, env)
+	res, err := cs.client.DoInternal(ctx, "GET", fmt.Sprintf("/v2/organizations/%s/instance?page=1&perPage=1000&projectId=%s", env.TenantID, env.ProjectID), nil, env)
+
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		bb, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return nil, fmt.Errorf("get all clusters failed: reason could not be determined: %v", err)
+		}
+		return nil, fmt.Errorf("get all clusters failed: %s", string(bb))
+	}
+
+	bb, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("get all clusters succeeded: but body could not be read: %v", err)
+	}
+
+	var respBody getAllColumnarInternalJSON
+	if err := json.Unmarshal(bb, &respBody); err != nil {
+		return nil, err
+	}
+
+	var clusters []*cluster.Cluster
+	for _, d := range respBody.Items {
+		if d.Data.ProjectID != env.ProjectID {
+			continue
+		}
+		c, err := cs.GetColumnar(ctx, d.Data.Name)
+		if err != nil {
+			log.Printf("Failed to get cluster: %s: %v", d.Data.Name, err)
 			continue
 		}
 
@@ -437,8 +622,10 @@ func (cs *CloudService) GetAllClusters(ctx context.Context) ([]*cluster.Cluster,
 		if err != nil {
 			return nil, err
 		}
-
 		allClusters = append(allClusters, clusters...)
+
+		columnars, err := cs.getAllColumnars(ctx, env)
+		allClusters = append(columnars, clusters...)
 	}
 
 	return allClusters, nil
@@ -454,6 +641,15 @@ func (cs *CloudService) KillCluster(ctx context.Context, clusterID string) error
 		return err
 	}
 
+	meta, err := cs.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		return err
+	}
+
+	if meta.Columnar {
+		return cs.killColumnar(ctx, clusterID, cloudClusterID, env)
+	}
 	return cs.killCluster(ctx, clusterID, cloudClusterID, env)
 }
 
@@ -547,6 +743,128 @@ func (cs *CloudService) postClusterCreate(ctx context.Context, clusterID, cloudC
 
 	// allow all ips, these are only temporary, non security sensitive clusters so it's fine
 	if err := cs.addIP(ctx, clusterID, cloudClusterID, "0.0.0.0/0", env); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (cs *CloudService) SetupColumnar(ctx context.Context, clusterID string, opts CreateColumnarOptions,
+	maxRequestTimeout time.Duration) error {
+	env := cs.defaultEnv
+
+	if opts.EnvName != "" {
+		customEnv, ok := cs.envs[opts.EnvName]
+		if !ok {
+			return fmt.Errorf("environment %s not found", opts.EnvName)
+		}
+		env = customEnv
+	}
+
+	if opts.Environment != nil {
+		env = opts.Environment
+	}
+
+	provider := defaultProvider
+	if opts.Provider != "" {
+		switch opts.Provider {
+		case "aws":
+			provider = ProviderHostedAWS
+		case "gcp":
+			provider = ProviderHostedGCP
+		default:
+			return fmt.Errorf("provider %s is not supported", opts.Provider)
+		}
+	}
+
+	region := opts.Region
+	if region == "" {
+		switch provider {
+		case ProviderHostedAWS:
+			region = defaultRegionAWS
+		case ProviderHostedGCP:
+			region = defaultRegionGCP
+		}
+	}
+
+	reqCtx, cancel := context.WithDeadline(ctx, time.Now().Add(maxRequestTimeout))
+	defer cancel()
+
+	columnarBody := CreateColumnarInstance{
+		Name:     clusterID,
+		Provider: provider,
+		Region:   region,
+		Nodes:    opts.Nodes,
+	}
+	res, err := cs.client.DoInternal(reqCtx, "POST", fmt.Sprintf(createColumnarPath, env.TenantID, env.ProjectID), columnarBody, env)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	type ID struct {
+		ID string `json:"id"`
+	}
+
+	b, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+	id := &ID{}
+	err = json.Unmarshal(b, id)
+	if err != nil {
+		return err
+	}
+
+	cloudClusterID := id.ID
+
+	err = cs.metaStore.UpdateClusterMeta(clusterID, func(meta store.ClusterMeta) (store.ClusterMeta, error) {
+		meta.Columnar = true
+		meta.CloudClusterID = cloudClusterID
+		return meta, nil
+	})
+	if err != nil {
+		return err
+	}
+
+	err = cs.postColumnarCreate(ctx, clusterID, cloudClusterID, env, maxRequestTimeout)
+	if err != nil {
+		go func() {
+			cs.killColumnar(ctx, clusterID, cloudClusterID, env)
+		}()
+		return err
+	}
+
+	return nil
+
+}
+
+func (cs *CloudService) postColumnarCreate(ctx context.Context, clusterID, cloudClusterID string, env *store.CloudEnvironment, maxRequestTimeout time.Duration) error {
+	tCtx, cancel := context.WithDeadline(ctx, time.Now().Add(25*time.Minute))
+	defer cancel()
+
+	for {
+		getReqCtx, cancel := context.WithDeadline(tCtx, time.Now().Add(maxRequestTimeout))
+
+		// If the tCtx deadline expires then this return an error.
+		c, err := cs.getColumnar(getReqCtx, cloudClusterID, env)
+		cancel()
+		if err != nil {
+			return err
+		}
+
+		if c.Data.State == clusterHealthy {
+			break
+		}
+
+		if c.Data.State == clusterDeploymentFailed {
+			return errors.New("create cluster failed: status is deploymentFailed")
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+	// allow all ips, these are only temporary, non security sensitive clusters so it's fine
+	if err := cs.addColumnarIP(ctx, clusterID, cloudClusterID, "0.0.0.0/0", env); err != nil {
 		return err
 	}
 
@@ -811,6 +1129,19 @@ func (cs *CloudService) ConnString(ctx context.Context, clusterID string, useSSL
 		return "", errors.New("only SSL supported for cloud")
 	}
 
+	meta, err := cs.metaStore.GetClusterMeta(clusterID)
+	if err != nil {
+		log.Printf("Encountered unregistered cluster: %s", clusterID)
+		return "", err
+	}
+	if meta.Columnar {
+		c, err := cs.GetColumnar(ctx, clusterID)
+		if err != nil {
+			return "", err
+		}
+		return "couchbases://" + c.EntryPoint, nil
+	}
+
 	c, err := cs.GetCluster(ctx, clusterID)
 	if err != nil {
 		return "", err
@@ -878,4 +1209,39 @@ func (cs *CloudService) GetCertificate(ctx context.Context, clusterID string) (s
 	lastCert := (*respBody)[len(*respBody)-1]
 
 	return strings.TrimSpace(lastCert.Pem), nil
+}
+
+func (cs *CloudService) CreateColumnarKey(ctx context.Context, clusterID string) (*ColumnarApiKeys, error) {
+	return cs.createColumnarKey(ctx, clusterID)
+}
+
+func (cs *CloudService) createColumnarKey(ctx context.Context, clusterID string) (*ColumnarApiKeys, error) {
+	cloudClusterId, env, err := cs.getCloudClusterEnv(ctx, clusterID)
+	if err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/v2/organizations/%s/projects/%s/instance/%s/apikeys", env.TenantID, env.ProjectID, cloudClusterId)
+	res, err := cs.client.doInternal(ctx, "POST", path, nil, false, env)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		bb, err := ioutil.ReadAll(res.Body)
+		return nil, fmt.Errorf("unable to create api keys: %s, %v", string(bb), err)
+	}
+
+	bb, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("create api keys succeeded: but body could not be read: %v", err)
+	}
+
+	respBody := &ColumnarApiKeys{}
+	if err := json.Unmarshal(bb, &respBody); err != nil {
+		return nil, err
+	}
+
+	return respBody, nil
 }

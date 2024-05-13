@@ -18,4 +18,14 @@ type ClusterSetupOptions struct {
 	EnvName     string
 	Image       string
 	Server      string
+	IsColumnar  bool
+}
+
+type CreateColumnarOptions struct {
+	Timeout     string
+	Environment *store.CloudEnvironment
+	Region      string
+	Provider    string
+	EnvName     string
+	Nodes       int
 }

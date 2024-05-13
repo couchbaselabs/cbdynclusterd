@@ -20,6 +20,11 @@ const (
 	sessionsPath        = "/sessions"
 	createUserPath      = internalBasePath + "/users"
 
+	createColumnarPath       = "/v2/organizations/%s/projects/%s/instance"
+	internalInstanceBasePath = "/v2/organizations/%s/projects/%s/instance/%s"
+
+	addColumnarIPPath = internalInstanceBasePath + "/allowlists"
+
 	clusterHealthy          = "healthy"
 	clusterDeleting         = "destroying"
 	clusterDeploying        = "deploying"

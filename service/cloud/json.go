@@ -1,14 +1,27 @@
 package cloud
 
 type getAllClustersClusterJSON struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Project struct {
+		ID string `json:"id"`
+	} `json:"project"`
 }
 
 type getAllClustersJSON struct {
 	Data struct {
 		Items []getAllClustersClusterJSON `json:"items"`
 	} `json:"data"`
+}
+
+type getAllClustersInternalJSON struct {
+	Data []struct {
+		Items getAllClustersClusterJSON `json:"data"`
+	} `json:"data"`
+}
+
+type getAllColumnarInternalJSON struct {
+	Items []getColumnarJSON `json:"data"`
 }
 
 type getClusterJSONVersion struct {
@@ -248,4 +261,39 @@ type GetTrustedCAsResponse_Certificate struct {
 	NotBefore string `json:"notBefore"`
 	NotAfter  string `json:"notAfter"`
 	Pem       string `json:"pem"`
+}
+
+type CreateColumnarInstance struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Provider    Provider `json:"provider"`
+	Region      string   `json:"region"`
+	Nodes       int      `json:"nodes"`
+}
+
+type getColumnarJSON struct {
+	Data columnarData `json:"data"`
+}
+
+type columnarData struct {
+	Id        string         `json:"id"`
+	TenantId  string         `json:"tenantId"`
+	ProjectID string         `json:"projectId"`
+	State     string         `json:"state"`
+	Name      string         `json:"name"`
+	Version   int            `json:"version"`
+	Config    columnarConfig `json:"config"`
+}
+
+type columnarConfig struct {
+	Provider  string `json:"provider"`
+	Region    string `json:"region"`
+	NodeCount int    `json:"nodeCount"`
+	Endpoint  string `json:"endpoint"`
+	ClusterId string `json:"clusterId"`
+}
+
+type ColumnarApiKeys struct {
+	APIKeyId string `json:apikeyId`
+	Secret   string `json:secret`
 }

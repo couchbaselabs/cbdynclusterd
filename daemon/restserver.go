@@ -995,6 +995,7 @@ func (d *daemon) HttpCreateCloudCluster(w http.ResponseWriter, r *http.Request) 
 		EnvName:     reqData.EnvName,
 		Image:       reqData.Image,
 		Server:      reqData.Server,
+		IsColumnar:  true,
 	}
 
 	err = d.cloudService.SetupCluster(reqCtx, clusterID, clusterOpts, helper.RestTimeout)
@@ -1131,6 +1132,108 @@ func (d *daemon) HttpGetClusterCertificate(w http.ResponseWriter, r *http.Reques
 	writeJsonResponse(w, c)
 }
 
+func (d *daemon) HttpCreateCloudColumnar(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	var reqData CreateColumnarJSON
+	err = readJsonRequest(r, &reqData)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	timeout := 1 * time.Hour
+
+	if reqData.Timeout != "" {
+		clusterTimeout, err := time.ParseDuration(reqData.Timeout)
+		if err != nil {
+			writeJSONError(w, err)
+			return
+		}
+
+		timeout = clusterTimeout
+	}
+
+	if timeout < 0 {
+		writeJSONError(w, errors.New("must specify a valid timeout for the cluster"))
+		return
+	}
+	if timeout > 2*7*24*time.Hour {
+		writeJSONError(w, errors.New("cannot allocate clusters for longer than 2 weeks"))
+		return
+	}
+
+	clusterID := helper.NewRandomClusterID()
+
+	meta := store.ClusterMeta{
+		Owner:            dyncontext.ContextUser(reqCtx),
+		Timeout:          time.Now().Add(timeout),
+		Platform:         store.ClusterPlatformCloud,
+		UseSecure:        true,
+		CloudEnvironment: reqData.Environment,
+		CloudEnvName:     reqData.EnvName,
+	}
+	if err := d.metaStore.CreateClusterMeta(clusterID, meta); err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	opts := cloud.CreateColumnarOptions{
+		Timeout:     reqData.Timeout,
+		Environment: reqData.Environment,
+		Region:      reqData.Region,
+		Provider:    reqData.Provider,
+		EnvName:     reqData.EnvName,
+		Nodes:       reqData.Nodes,
+	}
+
+	err = d.cloudService.SetupColumnar(reqCtx, clusterID, opts, helper.RestTimeout)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	// update timeout to account for the time it takes to provision the cluster
+	err = d.metaStore.UpdateClusterMeta(clusterID, func(meta store.ClusterMeta) (store.ClusterMeta, error) {
+		meta.Timeout = time.Now().Add(timeout)
+		return meta, nil
+	})
+
+	dCtx, cancel := context.WithDeadline(reqCtx, time.Now().Add(helper.RestTimeout))
+	defer cancel()
+
+	c, err := d.cloudService.GetColumnar(dCtx, clusterID)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	newClusterJson := jsonifyCluster(c)
+	writeJsonResponse(w, newClusterJson)
+}
+
+func (d *daemon) HttpCreateCloudColumnarAPIKeys(w http.ResponseWriter, r *http.Request) {
+	reqCtx, err := getHttpContext(r)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	clusterID := mux.Vars(r)["cluster_id"]
+
+	key, err := d.cloudService.CreateColumnarKey(reqCtx, clusterID)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	writeJsonResponse(w, key)
+}
+
 func (d *daemon) createRESTRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/", d.HttpRoot)
@@ -1139,6 +1242,8 @@ func (d *daemon) createRESTRouter() *mux.Router {
 	r.HandleFunc("/clusters", d.HttpGetClusters).Methods("GET")
 	r.HandleFunc("/clusters", d.HttpCreateCluster).Methods("POST")
 	r.HandleFunc("/create-cloud", d.HttpCreateCloudCluster).Methods("POST")
+	r.HandleFunc("/create-columnar", d.HttpCreateCloudColumnar).Methods("POST")
+	r.HandleFunc("/columnar/{cluster_id}/create-key", d.HttpCreateCloudColumnarAPIKeys).Methods("POST")
 	r.HandleFunc("/cluster/{cluster_id}", d.HttpGetCluster).Methods("GET")
 	r.HandleFunc("/cluster/{cluster_id}", d.HttpUpdateCluster).Methods("PUT")
 	r.HandleFunc("/cluster/{cluster_id}/setup", d.HttpSetupCluster).Methods("POST")
