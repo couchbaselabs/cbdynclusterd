@@ -273,6 +273,15 @@ type CreateCloudClusterJSON struct {
 	Server      string                  `json:"server,omitempty"`
 }
 
+type CreateColumnarJSON struct {
+	Timeout     string                  `json:"timeout"`
+	Environment *store.CloudEnvironment `json:"environment,omitempty"`
+	Region      string                  `json:"region"`
+	Provider    string                  `json:"provider"`
+	EnvName     string                  `json:"env_name"`
+	Nodes       int                     `json:"nodes"`
+}
+
 type AddIPJSON struct {
 	IP string `json:"ip"`
 }
