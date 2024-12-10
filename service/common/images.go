@@ -2,9 +2,8 @@ package common
 
 import (
 	"fmt"
-	"net/http"
-
 	"github.com/pkg/errors"
+	"net/http"
 )
 
 func CheckBuildExists(versionInfo *NodeVersion) error {
