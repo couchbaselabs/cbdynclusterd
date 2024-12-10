@@ -62,7 +62,7 @@ func (nv *NodeVersion) PkgExtension() string {
 }
 
 func isRPM(os string) bool {
-	return strings.HasPrefix(os, "centos") || strings.HasPrefix(os, "rhel") || strings.HasPrefix(os, "amzn2") || strings.HasPrefix(os, "oel") || strings.HasPrefix(os, "suse")
+	return strings.HasPrefix(os, "centos") || strings.HasPrefix(os, "rhel") || strings.HasPrefix(os, "amzn2") || strings.HasPrefix(os, "oel") || strings.HasPrefix(os, "suse") || strings.HasPrefix(os, "linux")
 }
 
 func (nv *NodeVersion) pkgArch() string {
@@ -94,7 +94,7 @@ var versionToFlavor = map[int]map[int]string{
 	4: {0: "sherlock", 5: "watson"},
 	5: {0: "spock", 5: "vulcan"},
 	6: {0: "alice", 5: "mad-hatter", 6: "mad-hatter"},
-	7: {0: "cheshire-cat", 1: "neo", 2: "neo", 5: "elixir", 6: "trinity"},
+	7: {0: "cheshire-cat", 1: "neo", 2: "neo", 5: "elixir", 6: "trinity", 7: "cypher"},
 	8: {0: "morpheus"},
 }
 
@@ -121,9 +121,7 @@ func flavorFromVersion(version string) (string, error) {
 
 func ParseServerVersion(version, os, arch string, useCE, serverlessMode bool) (*NodeVersion, error) {
 	nodeVersion := NodeVersion{}
-	if os == "" {
-		os = "centos7"
-	}
+
 	if arch == "" {
 		if isRPM(os) {
 			arch = "x86_64"
@@ -131,7 +129,6 @@ func ParseServerVersion(version, os, arch string, useCE, serverlessMode bool) (*
 			arch = "amd64"
 		}
 	}
-	nodeVersion.OS = os
 	nodeVersion.Arch = arch
 	versionParts := strings.Split(version, "-")
 	flavor, err := flavorFromVersion(versionParts[0])
@@ -140,6 +137,14 @@ func ParseServerVersion(version, os, arch string, useCE, serverlessMode bool) (*
 	}
 	nodeVersion.Version = versionParts[0]
 	nodeVersion.Flavor = flavor
+	if os == "" {
+		os = "centos7"
+	}
+	if flavor == "trinity" || flavor == "cypher" || flavor == "morpheus" {
+		os = "linux"
+	}
+	nodeVersion.OS = os
+
 	if len(versionParts) > 1 {
 		nodeVersion.Build = versionParts[1]
 	}

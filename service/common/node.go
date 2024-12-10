@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/url"
 	"os"
 	"path"
@@ -603,7 +604,7 @@ func (n *Node) WaitForBucketReady() error {
 	}
 }
 
-//WaitForBucketHealthy will wait until bucket with name s exists and that it is ready
+// WaitForBucketHealthy will wait until bucket with name s exists and that it is ready
 func (n *Node) WaitForBucketHealthy(b string) error {
 	params := &helper.RestCall{
 		ExpectedCode: 200,
@@ -1311,13 +1312,15 @@ func (n *Node) ScpToLocalDir(src, dest string) error {
 }
 
 func newClient(sshLogin *helper.Cred) (*ssh.Client, error) {
-	sshConfig := &ssh.ClientConfig{
+	// SSH client configuration
+	config := &ssh.ClientConfig{
 		User:            sshLogin.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Insecure, should be replaced in production
+		Timeout:         10 * time.Second,
 	}
 
 	if sshLogin.KeyPath == "" {
-		sshConfig.Auth = []ssh.AuthMethod{
+		config.Auth = []ssh.AuthMethod{
 			ssh.Password(sshLogin.Password),
 		}
 	} else {
@@ -1329,13 +1332,25 @@ func newClient(sshLogin *helper.Cred) (*ssh.Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Parsing private key file failed %v", err)
 		}
-		sshConfig.Auth = []ssh.AuthMethod{
+		config.Auth = []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		}
 	}
-	return ssh.Dial("tcp", fmt.Sprintf("%s:%d", sshLogin.Hostname, sshLogin.Port),
-		sshConfig)
 
+	// Establish SSH connection
+	address := fmt.Sprintf("%s:%d", sshLogin.Hostname, sshLogin.Port)
+	conn, err := net.DialTimeout("tcp", address, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("Error dialing: %v\n", err)
+	}
+
+	clientConn, chans, reqs, err := ssh.NewClientConn(conn, address, config)
+	if err != nil {
+		return nil, fmt.Errorf("Error establishing SSH connection: %v\n", err)
+	}
+
+	client := ssh.NewClient(clientConn, chans, reqs)
+	return client, nil
 }
 
 func newSession(sshLogin *helper.Cred) (*ssh.Session, error) {

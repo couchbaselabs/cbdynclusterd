@@ -30,22 +30,26 @@ var packageToAMIArg = map[string]map[string]AMIArg{
 	// From https://wiki.centos.org/Cloud/AWS
 	// > aws ec2 describe-images --owners aws-marketplace --filters Name=product-code,Values=cvugziknvmxgqna9noibqnnsy | jq '.Images[0].Name'
 	// > "CentOS-7-2111-20220825_1.x86_64-d9a3032a-921c-4c6d-b150-bde168105e42"
-	"centos7": {"x86_64": AMIArg{SourceAMIFilter: "CentOS-7*x86_64*", Owner: "aws-marketplace"}},
+	"centos7": {"x86_64": AMIArg{SourceAMIFilter: "CentOS Linux 7*", Owner: "aws-marketplace"}},
+	"linux":   {"x86_64": AMIArg{SourceAMIFilter: "Rocky-9-EC2-Base-*", Owner: "aws-marketplace"}},
 }
 
 var osToSSHUsername = map[string]string{
 	"amzn2":   "ec2-user",
 	"centos7": "centos",
+	"linux":   "rocky",
 }
 
 var osToPackerfilePrefix = map[string]string{
 	"amzn2":   "yum",
 	"centos7": "yum",
+	"linux":   "yum",
 }
 
 var osToDeviceName = map[string]string{
 	"amzn2":   "/dev/xvda",
 	"centos7": "/dev/sda1",
+	"linux":   "/dev/sda1",
 }
 
 func CallPacker(opts PackerOptions) error {

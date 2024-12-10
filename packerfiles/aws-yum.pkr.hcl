@@ -43,7 +43,7 @@ variable "serverless_mode" {
 
 source "amazon-ebs" "yum" {
   ami_name      = var.ami_name
-  instance_type = var.arch == "aarch64" ? "t4g.micro" : "t2.micro"
+  instance_type = var.arch == "aarch64" ? "t4g.micro" : "t2.small"
   source_ami_filter {
     filters = {
       name                = var.source_ami_filter

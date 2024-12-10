@@ -121,14 +121,17 @@ func (d *daemon) HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 			Arch:                node.Arch,
 			ServerlessMode:      node.ServerlessMode,
 		}
-		clusterOpts.Nodes = append(clusterOpts.Nodes, nodeOpts)
 		if node.Platform == "ec2" {
 			platform = store.ClusterPlatformEC2
+			if node.OS == "centos7" { // Default sent on older cbdyncluster, catching and changing to avoid issues
+				nodeOpts.OS = "linux"
+			}
 		} else if node.Platform == "docker" {
 			platform = store.ClusterPlatformDocker
 		} else if node.Platform == "cloud" {
 			platform = store.ClusterPlatformCloud
 		}
+		clusterOpts.Nodes = append(clusterOpts.Nodes, nodeOpts)
 	}
 
 	var s service.UnmanagedClusterService
@@ -144,7 +147,7 @@ func (d *daemon) HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 		Owner:    dyncontext.ContextUser(reqCtx),
 		Timeout:  clusterOpts.Deadline,
 		Platform: store.ClusterPlatform(platform),
-		OS:       reqData.Nodes[0].OS,
+		OS:       clusterOpts.Nodes[0].OS,
 	}
 	if err := d.metaStore.CreateClusterMeta(clusterID, meta); err != nil {
 		writeJSONError(w, err)
