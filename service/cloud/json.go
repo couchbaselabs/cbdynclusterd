@@ -6,9 +6,7 @@ type getAllClustersClusterJSON struct {
 }
 
 type getAllClustersJSON struct {
-	Data struct {
-		Items []getAllClustersClusterJSON `json:"items"`
-	} `json:"data"`
+	Data []getAllClustersClusterJSON `json:"data"`
 }
 
 type getClusterJSONVersion struct {

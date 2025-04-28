@@ -3,20 +3,13 @@ package cloud
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/couchbaselabs/cbdynclusterd/store"
 	"io"
 	"io/ioutil"
 	"net/http"
-	"strconv"
-	"strings"
 	"sync"
-	"time"
-
-	"github.com/couchbaselabs/cbdynclusterd/store"
 )
 
 // Totally not stolen from https://github.com/couchbasecloud/rest-api-examples/blob/main/go/client/client.go
@@ -69,15 +62,8 @@ func (c *client) Do(ctx context.Context, method, uri string, body interface{}, e
 		return nil, err
 	}
 
-	now := strconv.FormatInt(time.Now().Unix(), 10)
-	r.Header.Add(headerKeyTimestamp, now)
-
-	payload := strings.Join([]string{method, uri, now}, "\n")
-	h := hmac.New(sha256.New, []byte(env.SecretKey))
-	h.Write([]byte(payload))
-
-	bearer := "Bearer " + env.AccessKey + ":" + base64.StdEncoding.EncodeToString(h.Sum(nil))
-	r.Header.Add(headerKeyAuthorization, bearer)
+	bearer := fmt.Sprintf("Bearer %s", env.SecretKey)
+	r.Header.Set(headerKeyAuthorization, bearer)
 
 	return c.httpClient.Do(r)
 }
