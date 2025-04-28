@@ -2,13 +2,12 @@ package cloud
 
 const (
 	// public API
-	deleteClusterPath  = "/v3/clusters/"
-	getClusterPath     = "/v3/clusters/"
-	getAllClustersPath = "/v3/clusters"
+	deleteClusterPath  = "/v4/organizations/%s/projects/%s/clusters/%s"
+	getClusterPath     = "/v4/organizations/%s/projects/%s/clusters/%s"
+	getAllClustersPath = "/v4/organizations/%s/projects/%s/clusters"
 	// TODO: Use public API when AV-27634 fixed
 	// createUserPath     = "/v3/clusters/%s/users"
-	clustersHealthPath = "/v3/clusters/%s/health"
-
+	clustersHealthPath = "/v3/clusters/%s/health" // TODO: Update to v4 API; v3 is no longer supported
 	// internal API
 	internalBasePath = "/v2/organizations/%s/projects/%s/clusters/%s"
 	// Need to use /deploy to use custom image

@@ -89,7 +89,7 @@ func NewCloudService(defaultEnvKey string, config map[string]CapellaConfig, meta
 }
 
 func (cs *CloudService) getCluster(ctx context.Context, cloudClusterID string, env *store.CloudEnvironment) (*getClusterJSON, error) {
-	res, err := cs.client.Do(ctx, "GET", getClusterPath+cloudClusterID, nil, env)
+	res, err := cs.client.Do(ctx, "GET", fmt.Sprintf(getClusterPath, env.TenantID, env.ProjectID, cloudClusterID), nil, env)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (cs *CloudService) addIP(ctx context.Context, clusterID, cloudClusterID, ip
 func (cs *CloudService) killCluster(ctx context.Context, clusterID, cloudClusterID string, env *store.CloudEnvironment) error {
 	log.Printf("Running cloud KillCluster for %s: %s", clusterID, cloudClusterID)
 
-	res, err := cs.client.Do(ctx, "DELETE", deleteClusterPath+cloudClusterID, nil, env)
+	res, err := cs.client.Do(ctx, "DELETE", fmt.Sprintf(deleteClusterPath, env.TenantID, env.ProjectID, cloudClusterID), nil, env)
 	if err != nil {
 		return err
 	}
@@ -380,7 +380,7 @@ func (cs *CloudService) AddIP(ctx context.Context, clusterID, ip string) error {
 func (cs *CloudService) getAllClusters(ctx context.Context, env *store.CloudEnvironment) ([]*cluster.Cluster, error) {
 	// TODO: Implement pagination
 	// TODO: Support listing get all clusters across custom environments
-	res, err := cs.client.Do(ctx, "GET", getAllClustersPath+fmt.Sprintf("?perPage=1000&projectId=%s", env.ProjectID), nil, env)
+	res, err := cs.client.Do(ctx, "GET", fmt.Sprintf(getAllClustersPath, env.TenantID, env.ProjectID)+fmt.Sprintf("?perPage=100&projectId=%s", env.ProjectID), nil, env)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +405,7 @@ func (cs *CloudService) getAllClusters(ctx context.Context, env *store.CloudEnvi
 	}
 
 	var clusters []*cluster.Cluster
-	for _, d := range respBody.Data.Items {
+	for _, d := range respBody.Data {
 		c, err := cs.GetCluster(ctx, d.Name)
 		if err != nil {
 			log.Printf("Failed to get cluster: %s: %v", d.Name, err)
