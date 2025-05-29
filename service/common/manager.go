@@ -220,8 +220,9 @@ func (m *Manager) setupNewCluster() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if (version.Major > 7 || version.Major == 7 && version.Minor >= 1) && info.IsEnterprise {
-		if err := epnode.SetLowMagmaMinMemoryQuote(); err != nil {
+	// Do not modify the magma memory quota for 8.0+. The default should already be 100 MiB in that case.
+	if (version.Major == 7 && version.Minor >= 1) && info.IsEnterprise {
+		if err := epnode.SetLowMagmaMinMemoryQuota(); err != nil {
 			return "", err
 		}
 	}
