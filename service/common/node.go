@@ -220,7 +220,7 @@ func (n *Node) SetClusterEncryptionLevel(level string) error {
 }
 
 // Set the minimum magma bucket size to 256MB as this is what tests expect
-func (n *Node) SetLowMagmaMinMemoryQuote() error {
+func (n *Node) SetLowMagmaMinMemoryQuota() error {
 	body := "magmaMinMemoryQuota=256"
 
 	restParam := &helper.RestCall{
