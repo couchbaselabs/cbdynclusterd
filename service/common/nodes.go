@@ -140,6 +140,16 @@ func ParseServerVersion(version, os, arch string, useCE, serverlessMode bool) (*
 	if os == "" {
 		os = "centos7"
 	}
+
+	minor, err := strconv.Atoi(strings.Split(version, ".")[1])
+	if err != nil {
+		return nil, err
+	}
+	// Neo covers 7.1 and 7.2, but only from 7.2 onwards are only linux builds created
+	if flavor == "neo" && minor == 2 {
+		os = "linux"
+	}
+
 	if flavor == "trinity" || flavor == "cypher" || flavor == "morpheus" {
 		os = "linux"
 	}

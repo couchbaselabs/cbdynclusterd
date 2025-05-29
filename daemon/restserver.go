@@ -123,7 +123,18 @@ func (d *daemon) HttpCreateCluster(w http.ResponseWriter, r *http.Request) {
 		}
 		if node.Platform == "ec2" {
 			platform = store.ClusterPlatformEC2
-			if node.OS == "centos7" { // Default sent on older cbdyncluster, catching and changing to avoid issues
+			versionParts := strings.Split(strings.Split(node.ServerVersion, "-")[0], ".")
+			major, err := strconv.Atoi(versionParts[0])
+			if err != nil {
+				return
+			}
+
+			minor, err := strconv.Atoi(versionParts[1])
+			if err != nil {
+				return
+			}
+			// Must ensure the OS version is 'linux' for 7.2 and above
+			if major > 7 || major == 7 && minor >= 2 {
 				nodeOpts.OS = "linux"
 			}
 		} else if node.Platform == "docker" {
