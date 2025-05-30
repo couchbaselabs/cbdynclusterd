@@ -29,6 +29,8 @@ RUN rpm --install $BUILD_PKG
 
 RUN if [ ${SERVERLESS_MODE} == 'true' ]; then mkdir -p /etc/couchbase.d && /bin/sh -c 'echo serverless > /etc/couchbase.d/config_profile' && chmod 755 /etc/couchbase.d/config_profile; fi
 
+RUN yum install -y iptables
+
 #clean the cache
 RUN yum clean all
 
