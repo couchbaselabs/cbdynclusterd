@@ -41,18 +41,30 @@ variable "serverless_mode" {
   default = false
 }
 
+locals {
+  source_ami_filters = var.arch == "aarch64" ? {
+    name                = var.source_ami_filter
+    root-device-type    = "ebs"
+    virtualization-type = "hvm"
+    architecture        = "arm64"
+  } : {
+    name                = var.source_ami_filter
+    root-device-type    = "ebs"
+    virtualization-type = "hvm"
+    architecture        = "x86_64"
+  }
+}
+
+
 source "amazon-ebs" "yum" {
   ami_name      = var.ami_name
   instance_type = var.arch == "aarch64" ? "t4g.micro" : "t2.small"
   source_ami_filter {
-    filters = {
-      name                = var.source_ami_filter
-      root-device-type    = "ebs"
-      virtualization-type = "hvm"
-    }
-    most_recent = true
-    owners      = [var.ami_owner]
+    filters      = local.source_ami_filters
+    most_recent  = true
+    owners       = [var.ami_owner]
   }
+
   ssh_username          = var.ssh_username
   force_deregister      = true
   force_delete_snapshot = true
