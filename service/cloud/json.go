@@ -16,7 +16,7 @@ type getClusterJSONVersion struct {
 type getClusterJSON struct {
 	ID           string                `json:"id"`
 	ProjectID    string                `json:"projectId"`
-	Status       string                `json:"status"`
+	Status       string                `json:"currentState"`
 	Name         string                `json:"name"`
 	Version      getClusterJSONVersion `json:"version"`
 	EndpointsSRV string                `json:"endpointsSrv"`
