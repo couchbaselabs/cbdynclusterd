@@ -95,7 +95,7 @@ var versionToFlavor = map[int]map[int]string{
 	5: {0: "spock", 5: "vulcan"},
 	6: {0: "alice", 5: "mad-hatter", 6: "mad-hatter"},
 	7: {0: "cheshire-cat", 1: "neo", 2: "neo", 5: "elixir", 6: "trinity", 7: "cypher"},
-	8: {0: "morpheus"},
+	8: {0: "morpheus", 1: "totoro"},
 }
 
 func flavorFromVersion(version string) (string, error) {
@@ -150,7 +150,7 @@ func ParseServerVersion(version, os, arch string, useCE, serverlessMode bool) (*
 		os = "linux"
 	}
 
-	if flavor == "trinity" || flavor == "cypher" || flavor == "morpheus" {
+	if flavor == "trinity" || flavor == "cypher" || flavor == "morpheus" || flavor == "totoro" {
 		os = "linux"
 	}
 	nodeVersion.OS = os
