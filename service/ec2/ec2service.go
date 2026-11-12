@@ -28,14 +28,22 @@ import (
 
 var (
 	ErrEC2NotEnabled = errors.New("ec2 is not enabled, credentials not set")
+
+	errClusterNotFound = errors.New("cluster not found")
 )
+
+// route53API is the subset of the Route 53 client used by EC2Service, so it can be faked in tests.
+type route53API interface {
+	ListResourceRecordSets(ctx context.Context, params *route53.ListResourceRecordSetsInput, optFns ...func(*route53.Options)) (*route53.ListResourceRecordSetsOutput, error)
+	ChangeResourceRecordSets(ctx context.Context, params *route53.ChangeResourceRecordSetsInput, optFns ...func(*route53.Options)) (*route53.ChangeResourceRecordSetsOutput, error)
+}
 
 type EC2Service struct {
 	enabled               bool
 	route53Enabled        bool
 	metaStore             *store.ReadOnlyMetaDataStore
 	client                *ec2.Client
-	route53Client         *route53.Client
+	route53Client         route53API
 	aliasRepoPath         string
 	securityGroup         string
 	keyName               string
@@ -145,7 +153,17 @@ func (s *EC2Service) AllocateCluster(ctx context.Context, opts service.AllocateC
 	_, err = s.allocateNodes(ctx, opts.ClusterID, nodesToAllocate)
 
 	if err != nil {
-		s.KillCluster(ctx, opts.ClusterID)
+		// Clean up with a fresh context, as the request context may be the reason allocation failed (e.g.
+		// cancelled or timed out). Not found just means nothing was created before the failure.
+		cleanupCtx, cancel := context.WithTimeout(dyncontext.NewContext(context.Background(), dyncontext.ContextUser(ctx), true), 5*time.Minute)
+		defer cancel()
+
+		killErr := s.KillCluster(cleanupCtx, opts.ClusterID)
+		if killErr != nil && !errors.Is(killErr, errClusterNotFound) {
+			log.Printf("Failed to clean up cluster %s after failed allocation: %v", opts.ClusterID, killErr)
+			return fmt.Errorf("%w (cleanup of cluster %s also failed: %v)", err, opts.ClusterID, killErr)
+		}
+
 		return err
 	}
 
@@ -269,83 +287,141 @@ func (s *EC2Service) srvName(clusterID string, secure bool) string {
 
 }
 
-func (s *EC2Service) hasSrvRecords(ctx context.Context, clusterID string) (bool, error) {
-	// secure and insecure
-	variants := []bool{true, false}
+// clusterRecordSets returns every record set in the hosted zone that belongs to clusterID: the per-node
+// A records (<node name>-<clusterID>.<domain>) and the secure/insecure SRV records. Records are looked up
+// by name rather than built from the cluster's instances, so they are found whatever state the instances
+// are in (stopped, terminated, partially running) and whatever IP each record currently holds.
+func (s *EC2Service) clusterRecordSets(ctx context.Context, clusterID string) ([]route53types.ResourceRecordSet, error) {
+	normalise := func(name string) string {
+		return strings.ToLower(strings.TrimSuffix(name, ".")) + "."
+	}
 
-	for _, secure := range variants {
-		srvName := s.srvName(clusterID, secure)
+	aSuffix := normalise(fmt.Sprintf("-%s.%s", clusterID, s.domainName))
+	srvNames := map[string]bool{
+		normalise(s.srvName(clusterID, true)):  true,
+		normalise(s.srvName(clusterID, false)): true,
+	}
 
-		input := route53.ListResourceRecordSetsInput{
-			HostedZoneId:    aws.String(s.hostedZoneId),
-			StartRecordName: aws.String(srvName),
-			StartRecordType: route53types.RRTypeSrv,
-			MaxItems:        aws.Int32(1),
-		}
+	var sets []route53types.ResourceRecordSet
 
-		out, err := s.route53Client.ListResourceRecordSets(ctx, &input)
+	input := &route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(s.hostedZoneId),
+	}
 
+	for {
+		out, err := s.route53Client.ListResourceRecordSets(ctx, input)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 
-		actualRecords := 0
+		for _, set := range out.ResourceRecordSets {
+			if set.Name == nil {
+				continue
+			}
+			name := normalise(*set.Name)
 
-		for _, record := range out.ResourceRecordSets {
-			if strings.Contains(*record.Name, clusterID) {
-				actualRecords += 1
+			switch set.Type {
+			case route53types.RRTypeA:
+				// the node name must be a single label directly in front of the suffix
+				nodeName := strings.TrimSuffix(name, aSuffix)
+				if nodeName != name && nodeName != "" && !strings.Contains(nodeName, ".") {
+					sets = append(sets, set)
+				}
+			case route53types.RRTypeSrv:
+				if srvNames[name] {
+					sets = append(sets, set)
+				}
 			}
 		}
 
-		if actualRecords != 1 {
-			return false, nil
+		if !out.IsTruncated {
+			break
 		}
+
+		input.StartRecordName = out.NextRecordName
+		input.StartRecordType = out.NextRecordType
+		input.StartRecordIdentifier = out.NextRecordIdentifier
 	}
 
-	return true, nil
+	return sets, nil
 }
 
-func (s *EC2Service) hasARecords(ctx context.Context, cluster *cluster.Cluster) (bool, error) {
-	for _, node := range cluster.Nodes {
-		input := route53.ListResourceRecordSetsInput{
-			HostedZoneId:    aws.String(s.hostedZoneId),
-			StartRecordName: aws.String(node.Hostname),
-			StartRecordType: route53types.RRTypeA,
-			MaxItems:        aws.Int32(1),
-		}
+// removeClusterRecords deletes every record set belonging to clusterID, using the values held by Route 53
+// rather than the instances' current IPs (a delete only succeeds when the value matches exactly). It
+// returns the number of record sets that were found.
+func (s *EC2Service) removeClusterRecords(ctx context.Context, clusterID string) (int, error) {
+	sets, err := s.clusterRecordSets(ctx, clusterID)
+	if err != nil {
+		return 0, err
+	}
 
-		out, err := s.route53Client.ListResourceRecordSets(ctx, &input)
+	if len(sets) == 0 {
+		return 0, nil
+	}
 
-		if err != nil {
-			return false, err
-		}
+	err = s.deleteRecordSets(ctx, sets)
+	if err == nil {
+		return len(sets), nil
+	}
 
-		actualRecords := 0
+	// A change batch is all or nothing, so retry one record set at a time so that a single bad record
+	// can't stop the rest being removed.
+	log.Printf("Failed to delete dns records for cluster %s in a single batch, retrying individually: %v", clusterID, err)
 
-		for _, record := range out.ResourceRecordSets {
-			if strings.Contains(*record.Name, cluster.ID) {
-				actualRecords += 1
-			}
-		}
-
-		if actualRecords != 1 {
-			return false, nil
+	var failures []string
+	for _, set := range sets {
+		err := s.deleteRecordSets(ctx, []route53types.ResourceRecordSet{set})
+		if err != nil && !isRecordNotFound(err) {
+			failures = append(failures, fmt.Sprintf("%s %s: %v", set.Type, aws.ToString(set.Name), err))
 		}
 	}
 
-	return true, nil
+	if len(failures) > 0 {
+		return len(sets), fmt.Errorf("failed to delete dns records for cluster %s: %s", clusterID, strings.Join(failures, "; "))
+	}
+
+	return len(sets), nil
+}
+
+func (s *EC2Service) deleteRecordSets(ctx context.Context, sets []route53types.ResourceRecordSet) error {
+	changes := make([]route53types.Change, 0, len(sets))
+	for i := range sets {
+		changes = append(changes, route53types.Change{
+			Action:            route53types.ChangeActionDelete,
+			ResourceRecordSet: &sets[i],
+		})
+	}
+
+	_, err := s.route53Client.ChangeResourceRecordSets(ctx, &route53.ChangeResourceRecordSetsInput{
+		ChangeBatch: &route53types.ChangeBatch{
+			Changes: changes,
+		},
+		HostedZoneId: aws.String(s.hostedZoneId),
+	})
+
+	return err
+}
+
+// isRecordNotFound reports whether err is Route 53 rejecting a delete because the record set no longer
+// exists, which means there is nothing left to clean up.
+func isRecordNotFound(err error) bool {
+	var invalidBatch *route53types.InvalidChangeBatch
+	if !errors.As(err, &invalidBatch) {
+		return false
+	}
+
+	messages := append([]string{aws.ToString(invalidBatch.Message)}, invalidBatch.Messages...)
+	for _, message := range messages {
+		if strings.Contains(message, "not found") {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *EC2Service) createARecords(ctx context.Context, cluster *cluster.Cluster) error {
 	return s.changeARecords(ctx, cluster, route53types.ChangeActionCreate)
-}
-
-func (s *EC2Service) removeARecords(ctx context.Context, cluster *cluster.Cluster) error {
-	return s.changeARecords(ctx, cluster, route53types.ChangeActionDelete)
-}
-
-func (s *EC2Service) removeSrvRecords(ctx context.Context, cluster *cluster.Cluster) error {
-	return s.changeSrvRecords(ctx, cluster, route53types.ChangeActionDelete)
 }
 
 func (s *EC2Service) createSrvRecords(ctx context.Context, cluster *cluster.Cluster) error {
@@ -735,7 +811,7 @@ func (s *EC2Service) GetCluster(ctx context.Context, clusterID string) (*cluster
 		}
 	}
 
-	return nil, errors.New("cluster not found")
+	return nil, errClusterNotFound
 }
 
 func (s *EC2Service) KillCluster(ctx context.Context, clusterID string) error {
@@ -745,51 +821,79 @@ func (s *EC2Service) KillCluster(ctx context.Context, clusterID string) error {
 
 	log.Printf("Killing ec2 cluster %s (requested by: %s)", clusterID, dyncontext.ContextUser(ctx))
 
-	c, err := s.GetCluster(ctx, clusterID)
+	// Ownership comes from the metadata store rather than GetCluster, which only sees running instances.
+	if !dyncontext.ContextIgnoreOwnership(ctx) {
+		meta, err := s.metaStore.GetClusterMeta(clusterID)
+		if err != nil {
+			return errClusterNotFound
+		}
+
+		if meta.Owner != dyncontext.ContextUser(ctx) {
+			return errors.New("cannot kill clusters you don't own")
+		}
+	}
+
+	instanceIds, err := s.getClusterInstanceIds(ctx, clusterID)
 	if err != nil {
 		return err
 	}
 
-	if !dyncontext.ContextIgnoreOwnership(ctx) && c.Owner != dyncontext.ContextUser(ctx) {
-		return errors.New("cannot kill clusters you don't own")
-	}
-
-	var nodesToKill []string
-	for _, node := range c.Nodes {
-		nodesToKill = append(nodesToKill, node.ContainerID)
-	}
-
+	numRecords := 0
 	if s.route53Enabled {
-		has, err := s.hasARecords(ctx, c)
+		// DNS must go before the instances: once an instance is terminated its public IP can be handed to
+		// someone else, so if removal fails we leave the instances alone and return the error to retry later.
+		numRecords, err = s.removeClusterRecords(ctx, clusterID)
 		if err != nil {
 			return err
 		}
+	}
 
-		if has {
-			err = s.removeARecords(ctx, c)
-			if err != nil {
-				return err
-			}
-		}
+	if len(instanceIds) == 0 && numRecords == 0 {
+		return errClusterNotFound
+	}
 
-		has, err = s.hasSrvRecords(ctx, c.ID)
+	if len(instanceIds) > 0 {
+		err = s.terminateInstances(ctx, instanceIds)
 		if err != nil {
 			return err
 		}
-
-		if has {
-			if err = s.removeSrvRecords(ctx, c); err != nil {
-				return err
-			}
-		}
 	}
 
-	err = s.terminateInstances(ctx, nodesToKill)
-	if err != nil {
-		return err
-	}
+	log.Printf("Killed ec2 cluster %s: terminated %d instances, removed %d dns record sets", clusterID, len(instanceIds), numRecords)
 
 	return nil
+}
+
+// getClusterInstanceIds returns the IDs of every instance tagged with clusterID that has not already been
+// terminated, including stopped and pending instances that GetCluster does not report.
+func (s *EC2Service) getClusterInstanceIds(ctx context.Context, clusterID string) ([]string, error) {
+	paginator := ec2.NewDescribeInstancesPaginator(s.client, &ec2.DescribeInstancesInput{
+		Filters: []types.Filter{
+			{Name: aws.String("tag:com.couchbase.dyncluster.cluster_id"), Values: []string{clusterID}},
+			{Name: aws.String("instance-state-name"), Values: []string{
+				string(types.InstanceStateNamePending),
+				string(types.InstanceStateNameRunning),
+				string(types.InstanceStateNameStopping),
+				string(types.InstanceStateNameStopped),
+			}},
+		},
+	})
+
+	var instanceIds []string
+	for paginator.HasMorePages() {
+		out, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, reservation := range out.Reservations {
+			for _, instance := range reservation.Instances {
+				instanceIds = append(instanceIds, *instance.InstanceId)
+			}
+		}
+	}
+
+	return instanceIds, nil
 }
 
 func (s *EC2Service) KillAllClusters(ctx context.Context) error {
